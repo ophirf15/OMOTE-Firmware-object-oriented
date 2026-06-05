@@ -44,6 +44,18 @@ bool PopUpScreen::OnKeyEvent(KeyPressAbstract::KeyEvent aKeyEvent) {
   return mContentPage->OnKeyEvent(aKeyEvent);
 }
 
+void PopUpScreen::OnShow() {
+  Base::OnShow();
+  if (mContentPage)
+    mContentPage->OnShow();
+}
+
+void PopUpScreen::OnHide() {
+  if (mContentPage)
+    mContentPage->OnHide();
+  Base::OnHide();
+}
+
 void PopUpScreen::OnLvglEvent(lv_event_t *aEvent) {
   if (lv_event_get_code(aEvent) == LV_EVENT_SCREEN_LOADED) {
     mTimesLoaded++;

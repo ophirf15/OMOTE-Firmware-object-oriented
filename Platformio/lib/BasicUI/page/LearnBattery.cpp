@@ -76,18 +76,35 @@ LearnBattery::LearnBattery()
   lv_textarea_set_cursor_pos(mLog->LvglSelf(), 0);
 
   mStart->SetDisabled(mBattery->getCalMode() == calMode::direct);
-
-  mTimer = lv_timer_create(LearnBattery::onTimer, 100, this);
 }
 
-LearnBattery::~LearnBattery() {
-  mBattery->disableHibernate(false);
-  if (mOrigSleepTime != 0) // if changed restore
-    HardwareFactory::getAbstract().setSleepTimeout(mOrigSleepTime);
+LearnBattery::~LearnBattery() { stopBackgroundWork(); }
+
+void LearnBattery::OnShow() {
+  Base::OnShow();
+  mPageActive = true;
+  if (!mTimer)
+    mTimer = lv_timer_create(LearnBattery::onTimer, 100, this);
+}
+
+void LearnBattery::OnHide() {
+  stopBackgroundWork();
+}
+
+void LearnBattery::stopBackgroundWork() {
+  mPageActive = false;
+  mState = IDLE;
   if (mTimer) {
     lv_timer_del(mTimer);
     mTimer = nullptr;
   }
+  mBattery->disableHibernate(false);
+  if (mOrigSleepTime != 0) {
+    HardwareFactory::getAbstract().setSleepTimeout(mOrigSleepTime);
+    mOrigSleepTime = 0;
+  }
+  // Do not touch LVGL widgets here — popScreen may run this while the display
+  // is switching; SetText/SetDisabled can wedge lv_display_refr_timer.
 }
 
 void LearnBattery::DrawGraph(const std::vector<uint16_t> &aData) {
@@ -163,6 +180,8 @@ void LearnBattery::AddToLog(std::string aLogEntry) {
 void LearnBattery::onTimer(_lv_timer_t *aTimer) {
   LearnBattery *currentLearnBattery =
       reinterpret_cast<LearnBattery *>(lv_timer_get_user_data(aTimer));
+  if (!currentLearnBattery || !currentLearnBattery->mPageActive)
+    return;
 
   static int pass = 0;
   static int wakeCount = 20;
@@ -224,8 +243,12 @@ void LearnBattery::onTimer(_lv_timer_t *aTimer) {
         logger->info(logString);
 
         if (currentLearnBattery->mSocVals.size() < 100) {
+          if (!currentLearnBattery->mPageActive)
+            break;
           expectedWakeTime = HardwareFactory::getAbstract().getMillis() + 600000;
           HardwareFactory::getAbstract().enterSleep(HardwareAbstract::SleepMode::LIGHT_SLEEP_WAKE_ON_NOCHG, 600000); // wake every 10min
+          if (!currentLearnBattery->mPageActive)
+            break;
           wakeReason = HardwareFactory::getAbstract().getWakeUpReason();
           wakeCount = 50;
         } else {
@@ -258,8 +281,12 @@ void LearnBattery::onTimer(_lv_timer_t *aTimer) {
       if (wakeCount-- == 0) {
         auto sleepRem = expectedWakeTime - HardwareFactory::getAbstract().getMillis() - 5000; // 5000 allows for time consumed by wake
         if (sleepRem > 0) {                                                                   // if sleep time left go back to sleep
+          if (!currentLearnBattery->mPageActive)
+            break;
           logger->info("Woke due to keyboard or IMU, sleeping for another" + std::to_string(sleepRem) + "ms");
           HardwareFactory::getAbstract().enterSleep(HardwareAbstract::SleepMode::LIGHT_SLEEP_WAKE_ON_NOCHG, sleepRem);
+          if (!currentLearnBattery->mPageActive)
+            break;
           wakeReason = HardwareFactory::getAbstract().getWakeUpReason();
         } else // otherwise trigger measure on next call to onTimer
           wakeReason = HardwareAbstract::WakeReason::TIMER;
@@ -283,8 +310,12 @@ void LearnBattery::onTimer(_lv_timer_t *aTimer) {
     if (wakeCount-- == 0) {
       currentLearnBattery->mState = MEASURE_DISCHG;
       preRelaxSoc = rawSoc;
+      if (!currentLearnBattery->mPageActive)
+        break;
       expectedWakeTime = HardwareFactory::getAbstract().getMillis() + 120000;
       HardwareFactory::getAbstract().enterSleep(HardwareAbstract::SleepMode::LIGHT_SLEEP_WAKE_ON_CHG, 120000); // 2min
+      if (!currentLearnBattery->mPageActive)
+        break;
       wakeReason = HardwareFactory::getAbstract().getWakeUpReason();
     } else {
       if (millivolts < 3500) {
@@ -339,8 +370,12 @@ void LearnBattery::onTimer(_lv_timer_t *aTimer) {
       if (wakeCount-- == 0) {
         auto sleepRem = expectedWakeTime - HardwareFactory::getAbstract().getMillis() - 5000; // 5000 allows for time consumed by wake
         if (sleepRem > 0) {                                                                   // if sleep time left go back to sleep
+          if (!currentLearnBattery->mPageActive)
+            break;
           logger->info("Woke due to keyboard or IMU, sleeping for another" + std::to_string(sleepRem) + "ms");
           HardwareFactory::getAbstract().enterSleep(HardwareAbstract::SleepMode::LIGHT_SLEEP_WAKE_ON_CHG, sleepRem);
+          if (!currentLearnBattery->mPageActive)
+            break;
           wakeReason = HardwareFactory::getAbstract().getWakeUpReason();
         } else // otherwise trigger measure on next call to onTimer
           wakeReason = HardwareAbstract::WakeReason::TIMER;

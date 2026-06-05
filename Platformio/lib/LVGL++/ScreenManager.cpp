@@ -43,11 +43,10 @@ UI::Screen::Base::Ptr Manager::popScreen(Screen::Base *aScreenToRemove) {
     retVal = std::move(*screenToPop);
     mScreens.erase(screenToPop);
     if (isPopOffTopOfStack) {
-      // Make sure to show correct top of stack
-      // since we popped the top screen off
-      mScreens.back()->Show();
-      // Make sure to notify the screen that just got moved off top
+      // Stop timers / background work on the popped screen before loading
+      // the screen below — otherwise LVGL can wedge in refresh (loopTask WDT).
       retVal->OnHide();
+      mScreens.back()->Show();
       // In order to make sure the Transition can complete
       // flag the removed screen to stay alive in case it falls
       // out of scope and gets deleted quickly after this.

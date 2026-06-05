@@ -17,8 +17,11 @@ public:
   virtual ~LearnBattery();
 
   std::string GetTitle() override { return "Battery"; };
+  void OnShow() override;
+  void OnHide() override;
 
 private:
+  void stopBackgroundWork();
   enum States { IDLE,
                 WAIT_CHG,
                 MEASURE_CHG,
@@ -36,6 +39,7 @@ private:
   std::shared_ptr<BatteryInterface> mBattery;
 
   static constexpr auto distBetweenButtons = 5;
+  bool mPageActive = false;
   lv_timer_t *mTimer = nullptr;
   std::string mLogStr;
   Widget::Label *mCalModeLabel;

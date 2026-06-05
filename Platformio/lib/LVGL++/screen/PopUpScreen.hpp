@@ -24,6 +24,9 @@ public:
 
   bool OnKeyEvent(KeyPressAbstract::KeyEvent aKeyEvent) override;
 
+  void OnShow() override;
+  void OnHide() override;
+
   void OnLvglEvent(lv_event_t *aEvent);
 
 private:
