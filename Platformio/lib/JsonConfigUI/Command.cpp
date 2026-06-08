@@ -1,14 +1,37 @@
 #include "Command.hpp"
 #include "HardwareFactory.hpp"
+#include "ble_scene.hpp"
 #include <fstream>
+#include <unordered_map>
 
 using namespace Command;
+
+namespace {
+
+std::unordered_map<std::string, rapidjson::Document> &commandDocCache() {
+  static std::unordered_map<std::string, rapidjson::Document> cache;
+  return cache;
+}
+
+const rapidjson::Document &loadCommandDocument(const std::filesystem::path &commandFilePath) {
+  const std::string key = commandFilePath.string();
+  auto &cache = commandDocCache();
+  auto it = cache.find(key);
+  if (it != cache.end())
+    return it->second;
+
+  rapidjson::Document doc = OMOTE::JSON::GetDocument(commandFilePath);
+  auto inserted = cache.emplace(key, std::move(doc));
+  return inserted.first->second;
+}
+
+} // namespace
 
 CommandMode Commands::getCommand(const std::string &aCommandFile, const std::string &aCommandPrefix, const std::string &aCommand, CommandStruct &aCommandStruct) {
 
   std::filesystem::path commandFilePath(FS_PATH + aCommandFile);
 
-  rapidjson::Document d = OMOTE::JSON::GetDocument(commandFilePath);
+  const rapidjson::Document &d = loadCommandDocument(commandFilePath);
   if (d.HasParseError() || d.IsNull())
     return NONE;
 
@@ -44,10 +67,22 @@ CommandMode Commands::getCommand(const std::string &aCommandFile, const std::str
   return aCommandStruct.mode;
 }
 
+void Commands::releaseCachedDocuments() { commandDocCache().clear(); }
+
 void Commands::sendCommand(const CommandStruct &aCommandStruct) {
   if ((aCommandStruct.mode == MQTT) && (aCommandStruct.protocol == "PUB")) {
     HardwareFactory::getAbstract().wifi()->mqttSend(aCommandStruct.data[0].c_str(), aCommandStruct.data[1].c_str());
   } else if ((aCommandStruct.mode == IR) && (aCommandStruct.data.size() > 0)) {
     HardwareFactory::getAbstract().ir()->sendBackground(aCommandStruct.protocol, aCommandStruct.data);
+  } else if (aCommandStruct.mode == BLE) {
+    const std::string key =
+        !aCommandStruct.protocol.empty()
+            ? aCommandStruct.protocol
+            : (aCommandStruct.data.empty() ? std::string() : aCommandStruct.data[0]);
+    if (!key.empty()) {
+      ble_scene::requestBleStart();
+      if (auto ble = HardwareFactory::getAbstract().ble())
+        ble->sendKey(key);
+    }
   }
 }

@@ -117,6 +117,8 @@ python -m http.server 8080</pre>
             <label>Name in scene picker <input id="scene-picker-name" placeholder="Watch TV" /></label>
             <p class="muted small">Shown in the list when you tap the status bar on the remote.</p>
             <label>Title on status bar <input id="scene-screen-name" placeholder="TV" /></label>
+            <label class="field-inline"><input type="checkbox" id="scene-ble-enabled" /> Enable Bluetooth in this scene</label>
+            <p class="muted small">When on, BLE HID runs while this scene is active. Turned off in scene picker and during editor sync.</p>
             <p class="muted small">Shown at the top of the screen while this scene is active.</p>
             <details class="advanced-field hidden" id="scene-key-shortcut">
               <summary>Physical key shortcut (optional)</summary>
@@ -238,13 +240,21 @@ python -m http.server 8080</pre>
               <label>Action
                 <select id="action-type">
                   <option value="ir">Send infrared (TV / receiver / etc.)</option>
-                  <option value="ir_existing">Use existing button from this device</option>
+                  <option value="ble" id="action-type-ble">Send Bluetooth key</option>
+                  <option value="ir_existing">Use existing command from this device</option>
                 </select>
               </label>
               <div id="panel-ir">
                 <button type="button" id="btn-action-learn" class="primary">Learn from another remote</button>
                 <p id="action-learn-msg" class="msg muted small">Point any IR remote at OMOTE and press a button.</p>
                 <label class="advanced-field hidden">Command name <input id="action-cmd-name" placeholder="VOL_UP" /></label>
+              </div>
+              <div id="panel-ble" class="hidden ble-scene-only">
+                <label>BLE key
+                  <select id="key-ble-key"></select>
+                </label>
+                <label>Save as command <input id="action-ble-cmd-name" placeholder="VOL_UP" /></label>
+                <p class="muted small">Creates a BLE entry in the page command file and maps this physical key to it.</p>
               </div>
               <div id="panel-ir-existing" class="hidden">
                 <label>Pick command
@@ -349,7 +359,7 @@ python -m http.server 8080</pre>
           <p class="muted small advanced-field hidden" id="linked-files-hint"></p>
         </aside>
         <aside class="panel commands-sidebar" id="page-commands-panel">
-          <h3 class="section-title">Page commands (IR)</h3>
+          <h3 class="section-title">Page commands (IR / BLE)</h3>
           <p class="muted small section-lead">Command file for the active device tab.</p>
           <label class="field-block">Command file
             <select id="page-cmd-file-select"></select>
@@ -375,7 +385,8 @@ python -m http.server 8080</pre>
         <div class="panel grow">
           <h2>IR &amp; action codes</h2>
           <p class="muted">Usually managed automatically when you learn buttons on the Remote tab.</p>
-          <table id="cmd-table"><thead><tr><th>Name</th><th>Mode</th><th>Protocol</th><th>Data</th><th></th></tr></thead><tbody></tbody></table>
+          <datalist id="ble-key-list"></datalist>
+          <table id="cmd-table"><thead><tr><th>Name</th><th>Mode</th><th>Protocol / BLE key</th><th>Data</th><th></th></tr></thead><tbody></tbody></table>
           <div class="row">
             <button type="button" id="btn-add-command">+ Add</button>
             <button type="button" id="btn-learn-ir">Learn IR</button>

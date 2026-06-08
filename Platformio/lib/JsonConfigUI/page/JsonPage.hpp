@@ -30,6 +30,8 @@ public:
   void applyHaStates();
 
   void getKeyOverrides(const rapidjson::Value &value, std::multimap<Command::KeyIds, Command::KeyStruct> &aKeyHandlers);
+  void getKeyOverrides(const std::vector<std::string> &keyNames,
+                       std::multimap<Command::KeyIds, Command::KeyStruct> &aKeyHandlers);
 
 private:
   struct HaBinding {

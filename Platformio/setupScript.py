@@ -351,9 +351,33 @@ def patchLvglLittleFsDriver():
             f.write(content)
         print(f"Patched LVGL LittleFS driver: {lv_fs_path}")
 
+def configureBleNimbleIncludes():
+    """NimBLE + arduino-espidf hybrid needs explicit include paths for BLE HID."""
+    pioenv = buildEnv.get("PIOENV", "")
+    if not pioenv.startswith("esp32"):
+        return
+    nimble_src = os.path.join(
+        buildEnv["PROJECT_DIR"],
+        ".pio",
+        "libdeps",
+        pioenv,
+        "NimBLE-Arduino",
+        "src",
+    )
+    if os.path.isdir(nimble_src):
+        buildEnv.Append(CPPPATH=[nimble_src])
+    packages = buildEnv.get("PROJECT_PACKAGES_DIR", "")
+    esp_timer_inc = os.path.join(
+        packages, "framework-espidf", "components", "esp_timer", "include"
+    )
+    if os.path.isdir(esp_timer_inc):
+        buildEnv.Append(CPPPATH=[esp_timer_inc])
+
+
 PrintInfo()
 # PrintEnv()
 EnsureSubmoduleCheckout()
+configureBleNimbleIncludes()
 ensureManagedComponents()
 configureExtraComponentDirs()
 patchLvglLittleFsDriver()

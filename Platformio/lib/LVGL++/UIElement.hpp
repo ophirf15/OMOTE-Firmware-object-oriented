@@ -137,6 +137,10 @@ protected:
   /// @brief Override in child class to run something after element is hidden
   virtual void OnHide();
 
+  /** Always notify contained children (used when a screen is covered by a popup). */
+  void propagateOnShowToChildren();
+  void propagateOnHideToChildren();
+
   /// @brief Override to run something when element is added to a parent
   /// @param aNewParent - Parent UIElement just added to
   virtual void OnAdded(UIElement *aNewParent) {};

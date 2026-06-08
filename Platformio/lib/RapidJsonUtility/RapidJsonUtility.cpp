@@ -57,7 +57,9 @@ rapidjson::Document GetDocument(const std::filesystem::path &aPathToJson) {
     return doc; // return empty doc if file couldn't be opened
   }
   rapidjson::IStreamWrapper fileStream(file);
-  doc.ParseStream<rapidjson::ParseFlag::kParseCommentsFlag>(fileStream);
+  constexpr auto kParseFlags = rapidjson::ParseFlag::kParseCommentsFlag |
+                               rapidjson::ParseFlag::kParseIterativeFlag;
+  doc.ParseStream<kParseFlags>(fileStream);
   return doc;
 }
 

@@ -1,6 +1,7 @@
 #include "StatusBar.hpp"
 
 #include "ActiveDeviceList.hpp"
+#include "UiOverlayGate.hpp"
 #include "Colors.hpp"
 #include "HardwareFactory.hpp"
 #include "PopUpScreen.hpp"
@@ -70,6 +71,16 @@ StatusBar::~StatusBar() {
     lv_timer_del(mTimer);
     mTimer = nullptr;
   }
+}
+
+void StatusBar::OnHide() {
+  if (mTimer)
+    lv_timer_pause(mTimer);
+}
+
+void StatusBar::OnShow() {
+  if (mTimer)
+    lv_timer_resume(mTimer);
 }
 
 void StatusBar::onTimer(_lv_timer_t *aTimer) {
@@ -162,6 +173,7 @@ void StatusBar::SetTopButtonLabel(std::string aLabel) {
 }
 
 void StatusBar::PushSettingsList(const bool aWithDebug) {
+  UiOverlayGate::setActive(true);
   auto settings = std::make_unique<Page::SettingsPage>();
   for (auto &item : mExtraSettingsItems) {
     settings->AddSettingItem(std::get<0>(item), std::get<1>(item), std::get<2>(item));
@@ -171,9 +183,7 @@ void StatusBar::PushSettingsList(const bool aWithDebug) {
       settings->AddSettingItem(std::get<0>(item), std::get<1>(item), std::get<2>(item));
     }
   }
-
-  UI::Screen::Manager::getInstance().pushPopUp(
-      std::move(settings), LV_SCR_LOAD_ANIM_OVER_BOTTOM);
+  UI::Screen::Manager::getInstance().pushPopUp(std::move(settings), LV_SCR_LOAD_ANIM_NONE);
 }
 
 void StatusBar::PushActiveDeviceList() {

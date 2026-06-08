@@ -11,6 +11,7 @@
 #include "Hardware/LoggingInterface.hpp"
 #include "Hardware/SystemStatsInterface.h"
 #include "Hardware/wifi/websockets/webSocketInterface.hpp"
+#include "Hardware/BleHandlerInterface.h"
 #include "Hardware/wifi/wifiHandlerInterface.h"
 #include "Notification.hpp"
 
@@ -51,6 +52,7 @@ public:
   virtual std::shared_ptr<IRInterface> ir() = 0;
   virtual std::shared_ptr<SystemStatsInterface> stats() = 0;
   virtual std::shared_ptr<webSocketInterface> webSocket() = 0;
+  virtual std::shared_ptr<BleHandlerInterface> ble() = 0;
 
   virtual std::chrono::milliseconds execTime() = 0;
 

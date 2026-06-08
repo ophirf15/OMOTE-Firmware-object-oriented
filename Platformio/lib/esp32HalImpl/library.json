@@ -25,7 +25,8 @@
             "-I logging",
             "-I stats",
             "-I wifiHandler",
-            "-I imu"
+            "-I imu",
+            "-I ble"
         ]
     },
     "frameworks": "*",

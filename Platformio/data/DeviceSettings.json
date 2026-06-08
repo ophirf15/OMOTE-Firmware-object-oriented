@@ -23,5 +23,6 @@
   "ftp_enabled": false,
   "ftp_mdns_name": "omote",
   "ftp_user": "OMOTE",
-  "ftp_password": "OMOTE"
+  "ftp_password": "OMOTE",
+  "ble_profile": "generic"
 }

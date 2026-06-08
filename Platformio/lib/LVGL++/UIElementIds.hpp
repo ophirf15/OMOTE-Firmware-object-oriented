@@ -60,6 +60,7 @@ public:
     ActionTesterPage,
     HomeScreenTabView,
     EditorSyncPage,
+    BleSettings,
     INVALID_PAGE_ID
   };
 

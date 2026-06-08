@@ -58,7 +58,7 @@ Use any local HTTPS static server, or rely on GitHub Pages.
 | partitions.bin  | 0x8000   |
 | boot_app0.bin   | 0xE000   |
 | firmware.bin    | 0x10000  |
-| littlefs.bin    | 0x24F000 |
+| littlefs.bin    | 0x290000 |
 
 ## Later
 

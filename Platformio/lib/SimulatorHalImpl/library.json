@@ -27,6 +27,7 @@
             "-I stats",
             "-I wifiHandler",
             "-I wifiHandlerSim",
+            "-I ble",
             "-lSDL2",
             "-lpthread"
         ]

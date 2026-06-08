@@ -17,14 +17,17 @@ const rapidjson::Document &document() { return sSchema; }
 
 bool isLoaded() { return sLoaded; }
 
-bool loadFromLittleFS() {
-  const auto doc = OMOTE::JSON::GetDocument(
+bool loadFromLittleFS(bool forceReload) {
+  if (!forceReload && sLoaded && sSchema.IsObject() && sSchema.HasMember("sections"))
+    return true;
+
+  auto doc = OMOTE::JSON::GetDocument(
       std::filesystem::path(FS_PATH "DeviceSettings.schema.json"));
   if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("sections")) {
     sLoaded = false;
     return false;
   }
-  sSchema.CopyFrom(doc, sSchema.GetAllocator());
+  sSchema = std::move(doc);
   sLoaded = true;
   return true;
 }

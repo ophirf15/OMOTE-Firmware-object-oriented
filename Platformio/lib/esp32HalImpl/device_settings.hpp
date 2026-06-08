@@ -34,12 +34,13 @@ struct Settings {
   std::string ftpMdnsName = "omote";
   std::string ftpUser = "OMOTE";
   std::string ftpPassword = "OMOTE";
+  std::string bleProfile = "generic";
 };
 
 Settings &current();
 const Settings &currentConst();
 
-bool loadFromLittleFS();
+bool loadFromLittleFS(bool forceReload = false);
 bool saveToLittleFS();
 rapidjson::Document toJsonDocument();
 /** Merge keys from a JSON object; returns false if not an object. */

@@ -32,6 +32,8 @@ std::string gIncoming;
 bool gAuthOk = false;
 bool gConnecting = false;
 bool gWantConnect = false;
+bool gBlePairingSuspended = false;
+bool gWantConnectBeforeBleSuspend = false;
 uint32_t gLastConnectAttemptMs = 0;
 uint32_t gNetworkReadyMs = 0;
 uint32_t gNextMsgId = 1;
@@ -491,6 +493,9 @@ void start() {
 }
 
 void tick() {
+  if (gBlePairingSuspended)
+    return;
+
   if (wifiReady() && gSettings.ok() && !editor_sync_mode::isActive() && !config_http::isRemoteSessionActive()) {
     if (gNetworkReadyMs == 0)
       gNetworkReadyMs = millis();
@@ -558,6 +563,26 @@ bool callServiceRestWithData(const std::string &domain, const std::string &servi
 
 bool fetchEntityStateRest(const std::string &entityId, std::string &stateOut, std::string &attributesJsonOut) {
   return ::fetchEntityStateRest(entityId, stateOut, attributesJsonOut);
+}
+
+void suspendForBlePairing() {
+  if (gBlePairingSuspended)
+    return;
+  gWantConnectBeforeBleSuspend = gWantConnect;
+  gBlePairingSuspended = true;
+  gWantConnect = false;
+  wsDisconnect();
+  Serial.printf("ha_ws: suspended for BLE heap=%u\n", static_cast<unsigned>(ESP.getFreeHeap()));
+}
+
+void resumeAfterBlePairing() {
+  if (!gBlePairingSuspended)
+    return;
+  gBlePairingSuspended = false;
+  gWantConnect = gWantConnectBeforeBleSuspend;
+  gWantConnectBeforeBleSuspend = false;
+  gLastConnectAttemptMs = 0;
+  Serial.printf("ha_ws: resumed after BLE heap=%u\n", static_cast<unsigned>(ESP.getFreeHeap()));
 }
 
 } // namespace HaWebSocket

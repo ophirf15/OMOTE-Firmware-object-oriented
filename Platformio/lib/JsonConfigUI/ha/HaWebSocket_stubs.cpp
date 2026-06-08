@@ -16,6 +16,8 @@ bool callServiceRestWithData(const std::string &, const std::string &, const std
 }
 bool fetchEntityStateRest(const std::string &, std::string &, std::string &) { return false; }
 void setStateCallback(StateCallback) {}
+void suspendForBlePairing() {}
+void resumeAfterBlePairing() {}
 
 } // namespace HaWebSocket
 

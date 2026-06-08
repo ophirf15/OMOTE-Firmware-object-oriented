@@ -2,6 +2,7 @@
 
 #include "EditorSyncPage.hpp"
 #include "HaRuntime.hpp"
+#include "UiOverlayGate.hpp"
 #include "HardwareFactory.hpp"
 #include "JsonHomeScreen.hpp"
 #include "LvglResourceManager.hpp"
@@ -18,8 +19,19 @@
 
 using namespace UI;
 
-JsonUI::JsonUI() : BasicUI() {
+namespace {
+Screen::JsonHomeScreen *gOverlayHomeScreen = nullptr;
+
+void onUiOverlayGate(bool active) {
+#ifndef IS_SIMULATOR
+  HaRuntime::setOverlayActive(active);
+#endif
+  if (active && gOverlayHomeScreen)
+    gOverlayHomeScreen->prepareForOverlay();
 }
+} // namespace
+
+JsonUI::JsonUI() : BasicUI() {}
 
 void JsonUI::loopHandler() {
   static bool syncUiShown = false;
@@ -50,9 +62,9 @@ void JsonUI::loopHandler() {
   if (config_reload::consumeHaSettingsDirty())
     HaRuntime::reloadSettingsFromDisk();
   if (config_reload::consumeDeviceSettingsSchemaDirty())
-    device_settings_schema::loadFromLittleFS();
+    device_settings_schema::loadFromLittleFS(true);
   if (config_reload::consumeDeviceSettingsDirty()) {
-    if (device_settings::loadFromLittleFS())
+    if (device_settings::loadFromLittleFS(true))
       device_settings::applyToHardware();
 #ifndef IS_SIMULATOR
     device_settings::notifyActivity();
@@ -66,8 +78,10 @@ void JsonUI::loopHandler() {
     pagesReloadPending = true;
 #endif
 
+  UiOverlayGate::setActive(Screen::Manager::getInstance().screenStackDepth() > 1);
   HaRuntime::tick();
   UIBase::loopHandler();
+  UiOverlayGate::setActive(Screen::Manager::getInstance().screenStackDepth() > 1);
 
 #ifdef IS_SIMULATOR
   // HW deploy uses reboot to pick up scene/page JSON; in-process reload can break touch.
@@ -84,6 +98,12 @@ void JsonUI::loopHandler() {
 void JsonUI::InitHomeScreen() {
   auto homeScreen = std::make_unique<Screen::JsonHomeScreen>(mDeviceFactory);
   mJsonHomeScreen = homeScreen.get();
+  gOverlayHomeScreen = mJsonHomeScreen;
+  UiOverlayGate::setHandler(onUiOverlayGate);
+  UiOverlayGate::setPrepareHandler([]() {
+    if (gOverlayHomeScreen)
+      gOverlayHomeScreen->prepareForOverlay();
+  });
   Screen::Manager::getInstance().pushScreen(std::move(homeScreen));
 };
 

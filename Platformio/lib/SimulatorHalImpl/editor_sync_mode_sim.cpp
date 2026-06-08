@@ -1,5 +1,6 @@
 #include "editor_sync_mode.hpp"
 
+#include "ble_scene.hpp"
 #include "HardwareFactory.hpp"
 
 namespace {
@@ -51,6 +52,8 @@ void exit(bool /*reboot*/) {
 
   if (auto ir = hw.ir())
     ir->enableRx();
+
+  ble_scene::setEditorSyncActive(false);
 }
 
 } // namespace editor_sync_mode

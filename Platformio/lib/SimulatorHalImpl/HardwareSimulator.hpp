@@ -9,6 +9,7 @@
 #include "batterySimulator.hpp"
 #include "simLogger.hpp"
 #include "webSocketSimulator.hpp"
+#include "ble/BleHandlerSim.hpp"
 #include "wifiHandlerSim.hpp"
 
 class HardwareSimulator : public HardwareAbstract {
@@ -38,6 +39,7 @@ public:
   std::shared_ptr<IRInterface> ir() override;
   std::shared_ptr<SystemStatsInterface> stats() override;
   std::shared_ptr<webSocketInterface> webSocket() override;
+  std::shared_ptr<BleHandlerInterface> ble() override;
 
   std::chrono::milliseconds execTime() override;
 
@@ -81,6 +83,7 @@ private:
   std::shared_ptr<BatterySimulator> mBattery;
   std::shared_ptr<SDLDisplay> mDisplay;
   std::shared_ptr<wifiHandlerSim> mWifiHandler;
+  std::shared_ptr<BleHandlerSim> mBleHandler;
   std::shared_ptr<KeyPressSim> mKeys;
   std::shared_ptr<IRSim> mIr;
   std::shared_ptr<StatsSimulator> mStats;

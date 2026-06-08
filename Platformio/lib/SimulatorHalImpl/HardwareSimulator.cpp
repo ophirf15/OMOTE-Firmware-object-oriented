@@ -8,6 +8,7 @@ HardwareSimulator::HardwareSimulator()
       mBattery(std::make_shared<BatterySimulator>()),
       mDisplay(SDLDisplay::getInstance()),
       mWifiHandler(std::make_shared<wifiHandlerSim>()),
+      mBleHandler(std::make_shared<BleHandlerSim>()),
       mKeys(std::make_shared<KeyPressSim>()),
       mIr(std::make_shared<IRSim>()),
       mStats(std::make_shared<StatsSimulator>()),
@@ -90,6 +91,8 @@ std::shared_ptr<DisplayAbstract> HardwareSimulator::display() {
 std::shared_ptr<wifiHandlerInterface> HardwareSimulator::wifi() {
   return mWifiHandler;
 }
+
+std::shared_ptr<BleHandlerInterface> HardwareSimulator::ble() { return mBleHandler; }
 std::shared_ptr<KeyPressAbstract> HardwareSimulator::keys() { return mKeys; }
 
 std::shared_ptr<IRInterface> HardwareSimulator::ir() { return mIr; }

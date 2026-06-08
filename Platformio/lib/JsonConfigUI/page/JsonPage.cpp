@@ -194,6 +194,8 @@ JsonPage::~JsonPage() {
 void JsonPage::OnShow() {
   Base::OnShow();
   HaRuntime::setActivePage(this, mHaEntityIds);
+  if (mHaEntityIds.empty())
+    return;
   applyHaStates();
   HaRuntime::requestRefresh();
 }
@@ -700,23 +702,36 @@ void JsonPage::addNumberPad(const std::string &aCommandPrefix, const rapidjson::
   }
 }
 
+namespace {
+
+void collectKeyOverride(const std::string &keyName, std::multimap<Command::KeyIds, Command::KeyStruct> &pageHandlers,
+                        std::multimap<Command::KeyIds, Command::KeyStruct> &outHandlers) {
+  auto id = magic_enum::enum_cast<Command::KeyIds>(keyName);
+  if (!id.has_value())
+    return;
+  auto range = pageHandlers.equal_range(id.value());
+  if (range.first == pageHandlers.end())
+    return;
+  for (auto it = range.first; it != range.second; ++it)
+    outHandlers.insert({it->first, it->second});
+  pageHandlers.erase(id.value());
+}
+
+} // namespace
+
 void JsonPage::getKeyOverrides(const rapidjson::Value &value, std::multimap<Command::KeyIds, Command::KeyStruct> &aKeyHandlers) {
-  if (value.IsArray()) {
-    for (rapidjson::SizeType i = 0; i < value.Size(); i++) {
-      if (value[i].IsString()) {
-        auto id = magic_enum::enum_cast<Command::KeyIds>(value[i].GetString());
-        if (id.has_value()) {
-          auto range = mKeyHandlers.equal_range(id.value());
-          if (range.first != mKeyHandlers.end()) {
-            for (auto i = range.first; i != range.second; ++i) {
-              aKeyHandlers.insert({i->first, i->second});
-            }
-            mKeyHandlers.erase(id.value()); // being overridden so may as well remove here
-          }
-        }
-      }
-    }
+  if (!value.IsArray())
+    return;
+  for (rapidjson::SizeType i = 0; i < value.Size(); i++) {
+    if (value[i].IsString())
+      collectKeyOverride(value[i].GetString(), mKeyHandlers, aKeyHandlers);
   }
+}
+
+void JsonPage::getKeyOverrides(const std::vector<std::string> &keyNames,
+                               std::multimap<Command::KeyIds, Command::KeyStruct> &aKeyHandlers) {
+  for (const auto &name : keyNames)
+    collectKeyOverride(name, mKeyHandlers, aKeyHandlers);
 }
 
 bool JsonPage::OnKeyEvent(KeyPressAbstract::KeyEvent aKeyEvent) {

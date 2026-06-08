@@ -7,7 +7,15 @@ Base::Base(ID aId) : UIElement(lv_obj_create(NULL), aId) {}
 void Base::Show() {
   lv_screen_load_anim(LvglSelf(), mPushAnimation, mTransitionAnimationTime,
                       mTransitionDelayTime, false);
-  UIElement::OnShow();
+  OnShow();
+}
+
+void Base::OnShow() {
+  propagateOnShowToChildren();
+}
+
+void Base::OnHide() {
+  propagateOnHideToChildren();
 }
 
 void Base::SetPushAnimation(lv_screen_load_anim_t aShowAnimation) {

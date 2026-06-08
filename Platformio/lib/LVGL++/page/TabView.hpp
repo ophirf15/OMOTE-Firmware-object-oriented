@@ -2,6 +2,7 @@
 
 #include "PageBase.hpp"
 #include <functional>
+#include <string>
 
 namespace UI::Page {
 class TabView;
@@ -12,20 +13,31 @@ class Tab : public Base {
 public:
   typedef std::unique_ptr<Tab> Ptr;
 
+  explicit Tab(lv_obj_t *aTab);
   Tab(lv_obj_t *aTab, Base::Ptr aContent);
 
-  void OnShow() override { mContent->OnShow(); };
-  void OnHide() override { mContent->OnHide(); };
-  ID GetID() override { return mContent->GetID(); }
+  bool HasContent() const { return mContent != nullptr; }
+  void SetContent(Base::Ptr aContent);
+  void ClearContent();
+
+  void OnShow() override;
+  void OnHide() override;
+  UI::ID GetID() override;
+  bool KeyEvent(KeyPressAbstract::KeyEvent aKeyEvent);
 
 private:
-  Base *mContent;
+  Base *mContent = nullptr;
 };
 
 class TabView : public Base {
 public:
   TabView(ID aId);
   void AddTab(Page::Base::Ptr aPage);
+  void AddPlaceholderTab(const std::string &title);
+  void LoadTabContent(uint16_t aTabIdx, Page::Base::Ptr aPage);
+  void UnloadTabContent(uint16_t aTabIdx);
+  bool HasTabContent(uint16_t aTabIdx) const;
+  size_t TabCount() const { return mTabs.size(); }
 
   uint16_t GetCurrentTabIdx();
   void SetCurrentTabIdx(uint16_t aTabToSetActive,

@@ -30,4 +30,8 @@ bool stateIsOn(const std::string &entityId, const std::string &state);
 void setActivePage(UI::Page::JsonPage *page, const std::vector<std::string> &entityIds);
 void requestRefresh();
 
+/** True while a popup (settings, etc.) covers the home/scene screen. */
+void setOverlayActive(bool active);
+bool overlayActive();
+
 } // namespace HaRuntime

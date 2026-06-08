@@ -46,6 +46,7 @@ public:
   virtual std::shared_ptr<IRInterface> ir() override;
   virtual std::shared_ptr<SystemStatsInterface> stats() override;
   virtual std::shared_ptr<webSocketInterface> webSocket() override;
+  virtual std::shared_ptr<BleHandlerInterface> ble() override;
   virtual std::shared_ptr<LIS3DH_IMU> imu();
 
   virtual std::chrono::milliseconds execTime() override;
@@ -105,6 +106,7 @@ protected:
 
 private:
   std::shared_ptr<wifiHandler> mWifiHandler;
+  std::shared_ptr<BleHandlerInterface> mBleHandler;
   std::shared_ptr<IRTransceiver> mIr;
   std::shared_ptr<EspStats> mStats = nullptr;
 

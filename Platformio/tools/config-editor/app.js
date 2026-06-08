@@ -18,6 +18,48 @@ const SOFT_RELOAD_PATHS = new Set([
 ]);
 const DEFAULT_DEVICE_SETTINGS_SCHEMA = OmoteSettingsForm.DEFAULT_DEVICE_SETTINGS_SCHEMA;
 const DEFAULT_DEVICE_SETTINGS = OmoteSettingsForm.defaultsFromSchema(DEFAULT_DEVICE_SETTINGS_SCHEMA);
+let canonicalDeviceSettingsSchema = null;
+
+async function loadCanonicalDeviceSettingsSchema() {
+  if (canonicalDeviceSettingsSchema) return canonicalDeviceSettingsSchema;
+  try {
+    const r = await fetch('canonical-device-settings.schema.json', { cache: 'no-cache' });
+    if (r.ok) canonicalDeviceSettingsSchema = await r.json();
+  } catch (_) { /* offline or file:// */ }
+  if (!canonicalDeviceSettingsSchema) {
+    const local = parseJson(DEVICE_SETTINGS_SCHEMA_PATH);
+    if (local?.sections?.some((s) => s.id === 'bluetooth')) {
+      canonicalDeviceSettingsSchema = JSON.parse(JSON.stringify(local));
+    }
+  }
+  if (canonicalDeviceSettingsSchema) {
+    canonicalDeviceSettingsSchema = OmoteSettingsForm.mergeProtectedSchemaSections(
+      canonicalDeviceSettingsSchema, canonicalDeviceSettingsSchema);
+  }
+  return canonicalDeviceSettingsSchema;
+}
+
+function rememberCanonicalDeviceSettingsSchema(schema) {
+  if (!schema?.sections?.length) return;
+  if (!canonicalDeviceSettingsSchema) {
+    canonicalDeviceSettingsSchema = JSON.parse(JSON.stringify(schema));
+    return;
+  }
+  canonicalDeviceSettingsSchema = OmoteSettingsForm.mergeProtectedSchemaSections(
+    canonicalDeviceSettingsSchema, schema);
+}
+
+/** Keep firmware-defined settings sections/fields; backup may only change values. */
+function applyProtectedDeviceSettingsFiles(markDirty = true) {
+  if (!canonicalDeviceSettingsSchema) return false;
+  const mergedSchema = OmoteSettingsForm.mergeProtectedSchemaSections(
+    parseJson(DEVICE_SETTINGS_SCHEMA_PATH) || {}, canonicalDeviceSettingsSchema);
+  setFile(DEVICE_SETTINGS_SCHEMA_PATH, mergedSchema, markDirty);
+  const mergedValues = OmoteSettingsForm.mergeDeviceSettingsValues(
+    parseJson(DEVICE_SETTINGS_PATH) || {}, mergedSchema);
+  setFile(DEVICE_SETTINGS_PATH, mergedValues, markDirty);
+  return true;
+}
 const HA_DOMAINS = ['light', 'switch', 'cover', 'climate', 'sensor', 'media_player', 'fan', 'scene', 'script', 'input_boolean', 'lock', 'button'];
 const HA_EDITOR_PREFS_KEY = 'omote_oo_ha_editor_prefs';
 
@@ -537,6 +579,155 @@ const DEFAULT_CMD_FOR_KEY = {
   Stop: 'STOP', Play: 'PLAY', Rewind: 'REWIND', FastForward: 'FORWARD',
   Aux1: 'RED', Aux2: 'GREEN', Aux3: 'YELLOW', Aux4: 'BLUE'
 };
+
+/** BLE keys aligned with firmware ble_handler.cpp (Android KeyEvent / HID). */
+const BLE_KEY_CATALOG = [
+  {
+    group: 'Navigation (DPAD)',
+    keys: [
+      { id: 'UP', label: 'DPAD_UP' },
+      { id: 'DOWN', label: 'DPAD_DOWN' },
+      { id: 'LEFT', label: 'DPAD_LEFT' },
+      { id: 'RIGHT', label: 'DPAD_RIGHT' },
+      { id: 'ENTER', label: 'DPAD_CENTER / OK' },
+      { id: 'BACK', label: 'BACK' },
+      { id: 'HOME', label: 'HOME' },
+      { id: 'MENU', label: 'MENU' },
+      { id: 'SEARCH', label: 'SEARCH' },
+      { id: 'APP_SWITCH', label: 'APP_SWITCH (recents)' },
+    ],
+  },
+  {
+    group: 'Volume & media',
+    keys: [
+      { id: 'VOLUME_UP', label: 'VOLUME_UP' },
+      { id: 'VOLUME_DOWN', label: 'VOLUME_DOWN' },
+      { id: 'MUTE', label: 'VOLUME_MUTE' },
+      { id: 'PLAY_PAUSE', label: 'MEDIA_PLAY_PAUSE' },
+      { id: 'PLAY', label: 'MEDIA_PLAY' },
+      { id: 'PAUSE', label: 'MEDIA_PAUSE' },
+      { id: 'STOP', label: 'MEDIA_STOP' },
+      { id: 'NEXT', label: 'MEDIA_NEXT' },
+      { id: 'PREVIOUS', label: 'MEDIA_PREVIOUS' },
+      { id: 'FORWARD', label: 'MEDIA_FAST_FORWARD' },
+      { id: 'REWIND', label: 'MEDIA_REWIND' },
+    ],
+  },
+  {
+    group: 'TV / live',
+    keys: [
+      { id: 'CHANNEL_UP', label: 'CHANNEL_UP' },
+      { id: 'CHANNEL_DOWN', label: 'CHANNEL_DOWN' },
+      { id: 'GUIDE', label: 'GUIDE (EPG)' },
+      { id: 'INFO', label: 'INFO' },
+      { id: 'CAPTIONS', label: 'CAPTIONS' },
+      { id: 'SETTINGS', label: 'SETTINGS' },
+      { id: 'TV', label: 'TV' },
+      { id: 'LIVE_TV', label: 'LIVE / LIVE_TV' },
+      { id: 'TV_INPUT', label: 'TV_INPUT' },
+      { id: 'DVR', label: 'DVR' },
+      { id: 'NOTIFICATION', label: 'NOTIFICATION' },
+      { id: 'PROFILE_SWITCH', label: 'PROFILE_SWITCH' },
+      { id: 'POWER', label: 'POWER (sleep/wake)' },
+      { id: 'TV_POWER', label: 'TV_POWER' },
+      { id: 'SLEEP', label: 'SLEEP' },
+      { id: 'PROG_RED', label: 'PROG_RED' },
+      { id: 'PROG_GREEN', label: 'PROG_GREEN' },
+      { id: 'PROG_YELLOW', label: 'PROG_YELLOW' },
+      { id: 'PROG_BLUE', label: 'PROG_BLUE' },
+      { id: 'MEDIA_AUDIO_TRACK', label: 'MEDIA_AUDIO_TRACK' },
+    ],
+  },
+  {
+    group: 'Assistant & editing',
+    keys: [
+      { id: 'ASSIST', label: 'ASSIST / voice' },
+      { id: 'VOICE_ASSIST', label: 'VOICE_ASSIST' },
+      { id: 'TAB', label: 'TAB' },
+      { id: 'PAGE_UP', label: 'PAGE_UP' },
+      { id: 'PAGE_DOWN', label: 'PAGE_DOWN' },
+      { id: 'BACKSPACE', label: 'BACK / DEL' },
+      { id: 'DELETE', label: 'FORWARD_DEL' },
+    ],
+  },
+  {
+    group: 'Streaming apps (gamepad)',
+    keys: [
+      { id: 'NETFLIX', label: 'Netflix → BUTTON_3' },
+      { id: 'YOUTUBE', label: 'YouTube → BUTTON_4' },
+      { id: 'PRIME_VIDEO', label: 'Prime → BUTTON_5' },
+      { id: 'DISNEY_PLUS', label: 'Disney+ → BUTTON_6' },
+      { id: 'SPOTIFY', label: 'Spotify → BUTTON_7' },
+      { id: 'BUTTON_1', label: 'BUTTON_1' },
+      { id: 'BUTTON_2', label: 'BUTTON_2' },
+      { id: 'BUTTON_3', label: 'BUTTON_3 (Netflix on GTV)' },
+      { id: 'BUTTON_4', label: 'BUTTON_4' },
+      { id: 'BUTTON_5', label: 'BUTTON_5' },
+      { id: 'BUTTON_6', label: 'BUTTON_6' },
+      { id: 'BUTTON_7', label: 'BUTTON_7' },
+      { id: 'BUTTON_8', label: 'BUTTON_8' },
+    ],
+  },
+];
+
+function buildBleKeySelectHtml() {
+  return BLE_KEY_CATALOG.map((g) => {
+    const opts = g.keys.map((k) => `<option value="${k.id}">${k.label}</option>`).join('');
+    return `<optgroup label="${g.group}">${opts}</optgroup>`;
+  }).join('');
+}
+
+function populateBleKeySelectElement(sel, selectedId = '') {
+  if (!sel) return;
+  sel.innerHTML = `<option value="">— pick BLE key —</option>${buildBleKeySelectHtml()}`;
+  if (selectedId) sel.value = selectedId;
+}
+
+function populateBleKeySelects() {
+  populateBleKeySelectElement($('key-ble-key'));
+  const datalist = $('ble-key-list');
+  if (datalist) {
+    datalist.innerHTML = '';
+    BLE_KEY_CATALOG.forEach((g) => {
+      g.keys.forEach((k) => {
+        const o = document.createElement('option');
+        o.value = k.id;
+        o.label = k.label;
+        datalist.appendChild(o);
+      });
+    });
+  }
+  document.querySelectorAll('select.page-cmd-ble-key').forEach((sel) => {
+    const cur = sel.value;
+    populateBleKeySelectElement(sel, cur);
+  });
+}
+
+function syncBleSceneUi() {
+  const bleOn = activeSceneUsesBle();
+  document.querySelectorAll('.ble-scene-only').forEach((el) => {
+    el.classList.toggle('hidden', !bleOn);
+  });
+  const bleOpt = $('action-type-ble');
+  if (bleOpt) {
+    bleOpt.hidden = !bleOn;
+    bleOpt.disabled = !bleOn;
+  }
+  if (!bleOn && $('action-type')?.value === 'ble') $('action-type').value = 'ir';
+  syncActionPanels();
+}
+
+function defaultBleKeyForPhysicalKey(keyName) {
+  const map = {
+    Up: 'UP', Down: 'DOWN', Left: 'LEFT', Right: 'RIGHT', Center: 'ENTER',
+    VolUp: 'VOLUME_UP', VolDown: 'VOLUME_DOWN', Mute: 'MUTE',
+    ChannelUp: 'CHANNEL_UP', ChannelDown: 'CHANNEL_DOWN',
+    Back: 'BACK', Menu: 'MENU', Info: 'INFO', Home: 'HOME', Guide: 'GUIDE',
+    Power: 'POWER', Search: 'SEARCH', Play: 'PLAY', Stop: 'STOP',
+    Rewind: 'REWIND', FastForward: 'FORWARD',
+  };
+  return map[keyName] || 'HOME';
+}
 
 const DEVICE_TEMPLATES = {
   blank: {
@@ -1395,6 +1586,8 @@ async function importOmotePack(file) {
 
   if (!paths.length) throw new Error('No JSON config files found in this .omote archive.');
 
+  await loadCanonicalDeviceSettingsSchema();
+
   const dirtyCount = [...files.values()].filter((v) => v.dirty).length;
   if (files.size && (dirtyCount || paths.length)) {
     const ok = confirm('Replace the current editor files with this backup? Unsaved changes will be lost.');
@@ -1408,6 +1601,7 @@ async function importOmotePack(file) {
   }
 
   if (!files.has('Scenes.json')) setFile('Scenes.json', { Scenes: [] }, true);
+  applyProtectedDeviceSettingsFiles(true);
   registerOrphanSceneFiles({ ask: true });
   initAfterLoad();
   $('status-bar').textContent = `Offline · ${files.size} files from backup`;
@@ -1810,8 +2004,11 @@ function commandNamesFromFile(path) {
 function describeCommand(cmdName, pagePath) {
   if (!cmdName) return '';
   const cf = commandFileForPage(pagePath);
-  const doc = parseJson(cf);
-  const hit = (doc?.Commands || []).find((c) => c.Command === cmdName);
+  const hit = getCommandRow(cf, cmdName);
+  if (hit?.Mode === 'BLE') {
+    const key = String(hit.Protocol || hit.Data?.[0] || '').trim();
+    return key ? `${cmdName} · BLE ${key}` : cmdName;
+  }
   if (hit?.Data?.[0]) return cmdName + ' · ' + hit.Protocol;
   return cmdName;
 }
@@ -1827,6 +2024,11 @@ function currentPage() {
 
 function savePage(page) {
   setFile(selectedPagePath, page);
+}
+
+function getCommandRow(cmdFile, name) {
+  const doc = parseJson(cmdFile);
+  return (doc?.Commands || []).find((c) => c.Command === name) || null;
 }
 
 function upsertCommand(cmdFile, name, protocol, code) {
@@ -1846,6 +2048,29 @@ function upsertCommand(cmdFile, name, protocol, code) {
   return name;
 }
 
+function upsertBleCommand(cmdFile, name, bleKey) {
+  const key = (bleKey || '').trim();
+  if (!key) throw new Error('Choose a BLE key');
+  const doc = parseJson(cmdFile) || { Manufacturer: 'Custom', DeviceClass: 'Generic', Commands: [] };
+  doc.Commands = doc.Commands || [];
+  let row = doc.Commands.find((c) => c.Command === name);
+  if (!row) {
+    row = { Command: name, Mode: 'BLE', Protocol: key, Data: [] };
+    doc.Commands.push(row);
+  } else {
+    row.Mode = 'BLE';
+    row.Protocol = key;
+    row.Data = [];
+  }
+  setFile(cmdFile, doc);
+  return name;
+}
+
+function activeSceneUsesBle() {
+  const scene = parseJson(selectedScenePath);
+  return !!scene?.BleEnabled;
+}
+
 function ensurePageCommandFile() {
   const page = currentPage();
   if (page.CommandFile && files.has(page.CommandFile)) return page.CommandFile;
@@ -1860,9 +2085,12 @@ const COLOR_KEY_LABELS = ['Red', 'Green', 'Yellow', 'Blue'];
 
 function commandRowStatus(cmdFile, commandName) {
   if (!commandName) return 'missing';
-  const doc = parseJson(cmdFile);
-  const row = (doc?.Commands || []).find((c) => c.Command === commandName);
+  const row = getCommandRow(cmdFile, commandName);
   if (!row) return 'missing';
+  if (row.Mode === 'BLE') {
+    const key = String(row.Protocol || row.Data?.[0] || '').trim();
+    return key ? 'ok' : 'placeholder';
+  }
   const data = Array.isArray(row.Data) ? String(row.Data[0] || '') : '';
   if (!data || data === '0x0' || data === '0x00') return 'placeholder';
   return 'ok';
@@ -1939,7 +2167,19 @@ function renderPageCommandsPanel() {
   const sel = $('page-cmd-file-select');
   const box = $('page-cmd-slots');
   const empty = $('page-cmd-empty');
+  const panelTitle = $('page-commands-panel')?.querySelector('.section-title');
   if (!sel || !box) return;
+
+  const sceneBle = activeSceneUsesBle();
+  if (panelTitle) {
+    panelTitle.textContent = sceneBle ? 'Page commands (IR / BLE)' : 'Page commands (IR)';
+  }
+  const panelLead = $('page-commands-panel')?.querySelector('.section-lead');
+  if (panelLead) {
+    panelLead.textContent = sceneBle
+      ? 'Map widgets and keys to IR codes or BLE HID keys. Enable Bluetooth on the scene first.'
+      : 'Command file for the active device tab.';
+  }
 
   const page = currentPage();
   const cf = ensurePageCommandFile();
@@ -1980,9 +2220,22 @@ function renderPageCommandsPanel() {
 
     const status = document.createElement('span');
     status.className = 'page-cmd-status ' + commandRowStatus(cf, slot.command);
+    const rowState = getCommandRow(cf, slot.command);
+    const rowMode = rowState?.Mode === 'BLE' ? 'BLE' : 'IR';
     status.title =
-      status.className.includes('ok') ? 'IR code set' :
-      status.className.includes('placeholder') ? 'Placeholder — learn or edit code' : 'Not in command file';
+      status.className.includes('ok') ? (rowMode === 'BLE' ? 'BLE key set' : 'IR code set') :
+      status.className.includes('placeholder') ? 'Placeholder — learn or set key' : 'Not in command file';
+
+    const modePick = document.createElement('select');
+    modePick.title = 'Command mode';
+    ['IR', 'BLE'].forEach((m) => {
+      const o = document.createElement('option');
+      o.value = m;
+      o.textContent = m;
+      if (m === rowMode) o.selected = true;
+      modePick.appendChild(o);
+    });
+    if (!sceneBle) modePick.disabled = true;
 
     const input = document.createElement('input');
     input.type = 'text';
@@ -1993,7 +2246,7 @@ function renderPageCommandsPanel() {
       const name = input.value.trim();
       setWidgetCommandName(page, slot, name);
       savePage(page);
-      ensureStubCommands(cf, [name]);
+      ensureStubCommands(cf, [name], activeSceneUsesBle());
       renderPageCommandsPanel();
       renderWidgetList(page);
       drawCanvas();
@@ -2019,13 +2272,39 @@ function renderPageCommandsPanel() {
       input.dispatchEvent(new Event('change'));
     };
 
-    const learnBtn = document.createElement('button');
-    learnBtn.type = 'button';
-    learnBtn.className = 'btn-learn-slot';
-    learnBtn.textContent = 'Learn';
-    learnBtn.onclick = async () => {
+    const bleKeyInput = document.createElement('select');
+    bleKeyInput.className = 'page-cmd-ble-key';
+    populateBleKeySelectElement(bleKeyInput, rowMode === 'BLE' ? (rowState?.Protocol || '') : '');
+
+    const actionBtn = document.createElement('button');
+    actionBtn.type = 'button';
+    actionBtn.className = 'btn-learn-slot';
+
+    function syncRowModeUi() {
+      const ble = modePick.value === 'BLE';
+      bleKeyInput.hidden = !ble;
+      actionBtn.textContent = ble ? 'Set BLE' : 'Learn';
+    }
+
+    actionBtn.onclick = async () => {
       const name = input.value.trim() || slot.command || 'LEARNED';
+      if (!name) return;
       const msg = $('page-cmd-msg');
+      if (modePick.value === 'BLE') {
+        try {
+          upsertBleCommand(cf, name, bleKeyInput.value);
+          setWidgetCommandName(page, slot, name);
+          savePage(page);
+          if (msg) { msg.textContent = `Set ${name} → BLE ${bleKeyInput.value.trim()}`; msg.className = 'msg ok small'; }
+          renderPageCommandsPanel();
+          renderWidgetList(page);
+          drawCanvas();
+          updateSelectionPanel();
+        } catch (e) {
+          if (msg) { msg.textContent = e.message; msg.className = 'msg err small'; }
+        }
+        return;
+      }
       if (msg) { msg.textContent = 'Learning… point remote at OMOTE.'; msg.className = 'msg muted small'; }
       try {
         const cap = await learnIr(msg);
@@ -2042,7 +2321,15 @@ function renderPageCommandsPanel() {
       }
     };
 
-    row.append(lbl, input, pick, status, learnBtn);
+    modePick.onchange = () => {
+      syncRowModeUi();
+      if (modePick.value === 'BLE' && !bleKeyInput.value) {
+        bleKeyInput.value = 'HOME';
+      }
+    };
+    syncRowModeUi();
+
+    row.append(lbl, modePick, input, pick, status, bleKeyInput, actionBtn);
     box.appendChild(row);
   });
 
@@ -2422,6 +2709,10 @@ function initAfterLoad() {
     setFile(DEVICE_SETTINGS_SCHEMA_PATH, DEFAULT_DEVICE_SETTINGS_SCHEMA, false);
   }
   if (!files.has(DEVICE_SETTINGS_PATH)) setFile(DEVICE_SETTINGS_PATH, { ...DEFAULT_DEVICE_SETTINGS }, false);
+  rememberCanonicalDeviceSettingsSchema(parseJson(DEVICE_SETTINGS_SCHEMA_PATH));
+  loadCanonicalDeviceSettingsSchema().then(() => {
+    if (applyProtectedDeviceSettingsFiles(false)) refreshDeviceSettingsPanel();
+  });
   loadHaSettingsForm();
   refreshDeviceSettingsPanel();
   if (!selectedScenePath) {
@@ -2495,6 +2786,7 @@ function refreshScenesTab() {
   $('scene-title').textContent = pickerName;
   $('scene-picker-name').value = entry?.SceneName || '';
   $('scene-screen-name').value = scene?.ScreenName || '';
+  if ($('scene-ble-enabled')) $('scene-ble-enabled').checked = !!scene?.BleEnabled;
   if ($('scene-bind-key')) $('scene-bind-key').value = entry?.BindToKey || '';
   if ($('scene-press-type')) $('scene-press-type').value = entry?.PressType || 'Press';
   renderDeviceTabList(scene);
@@ -2524,6 +2816,16 @@ $('scene-screen-name').oninput = () => {
   setFile(selectedScenePath, scene);
   refreshScenesTab();
 };
+
+$('scene-ble-enabled')?.addEventListener('change', () => {
+  const scene = parseJson(selectedScenePath) || {};
+  if ($('scene-ble-enabled').checked) scene.BleEnabled = true;
+  else delete scene.BleEnabled;
+  setFile(selectedScenePath, scene);
+  syncBleSceneUi();
+  renderPageCommandsPanel();
+  updateSelectionPanel();
+});
 
 function saveSceneRegistryFields() {
   const reg = sceneRegistry();
@@ -2653,6 +2955,8 @@ function refreshRemoteTab() {
   const pg = currentPage();
   const linkedHint = $('linked-files-hint');
   if (linkedHint) linkedHint.textContent = pg.CommandFile ? `Linked: ${selectedPagePath} → ${pg.CommandFile}` : '';
+  populateBleKeySelects();
+  syncBleSceneUi();
   renderPageCommandsPanel();
   renderWidgetList(pg);
   drawCanvas();
@@ -2877,14 +3181,17 @@ function populateImageFileList() {
   });
 }
 
-function ensureStubCommands(cmdFile, names) {
+function ensureStubCommands(cmdFile, names, preferBle = false) {
   if (!cmdFile || !names?.length) return;
   const doc = parseJson(cmdFile) || { Manufacturer: 'Custom', DeviceClass: 'Generic', Commands: [] };
   doc.Commands = doc.Commands || [];
   let changed = false;
   names.forEach((n) => {
     if (!doc.Commands.some((c) => c.Command === n)) {
-      doc.Commands.push({ Command: n, Mode: 'IR', Protocol: 'NEC', Data: ['0x0'] });
+      doc.Commands.push(
+        preferBle
+          ? { Command: n, Mode: 'BLE', Protocol: 'HOME', Data: [] }
+          : { Command: n, Mode: 'IR', Protocol: 'NEC', Data: ['0x0'] });
       changed = true;
     }
   });
@@ -3057,11 +3364,28 @@ function updateSelectionPanel(friendlyLabel) {
     $('selection-title').textContent = 'Physical key';
     $('selection-sub').textContent = friendlyLabel || KEY_LABELS[selection.keyName] || selection.keyName;
     const mapped = getKeyMapping(selection.keyName, $('key-press-type')?.value || 'Press');
-    $('action-type').value = mapped ? 'ir_existing' : 'ir';
-    populateActionCmdPick(mapped);
-    $('action-cmd-name').value = DEFAULT_CMD_FOR_KEY[selection.keyName] || selection.keyName.toUpperCase();
+    const cf = ensurePageCommandFile();
+    const mappedRow = mapped ? getCommandRow(cf, mapped) : null;
+    const defaultCmd = DEFAULT_CMD_FOR_KEY[selection.keyName] || selection.keyName.toUpperCase();
+    $('action-cmd-name').value = defaultCmd;
+    if ($('action-ble-cmd-name')) {
+      $('action-ble-cmd-name').value = mapped && mappedRow?.Mode === 'BLE' ? mapped : defaultCmd;
+    }
+    if (mapped && mappedRow?.Mode === 'BLE' && activeSceneUsesBle()) {
+      $('action-type').value = 'ble';
+      if ($('key-ble-key')) {
+        $('key-ble-key').value = mappedRow.Protocol || defaultBleKeyForPhysicalKey(selection.keyName);
+      }
+    } else {
+      $('action-type').value = mapped ? 'ir_existing' : (activeSceneUsesBle() ? 'ble' : 'ir');
+      if ($('key-ble-key') && $('action-type').value === 'ble') {
+        $('key-ble-key').value = defaultBleKeyForPhysicalKey(selection.keyName);
+      }
+      populateActionCmdPick(mapped);
+    }
     syncWidgetEditor();
   }
+  syncBleSceneUi();
   syncActionPanels();
 }
 
@@ -3096,6 +3420,7 @@ function populateActionCmdPick(selected) {
 function syncActionPanels() {
   const t = $('action-type')?.value;
   $('panel-ir')?.classList.toggle('hidden', t !== 'ir');
+  $('panel-ble')?.classList.toggle('hidden', t !== 'ble');
   $('panel-ir-existing')?.classList.toggle('hidden', t !== 'ir_existing');
   $('panel-key-advanced')?.classList.toggle('hidden', selection.kind !== 'key');
 }
@@ -3182,7 +3507,27 @@ $('btn-key-apply').onclick = () => {
   const page = currentPage();
   page.ButtonMaps = page.ButtonMaps || {};
   const pt = $('key-press-type').value;
-  const cmd = t === 'ir_existing' ? $('action-cmd-pick').value : $('action-cmd-name').value.trim();
+  let cmd = '';
+  if (t === 'ir_existing') cmd = $('action-cmd-pick').value;
+  else if (t === 'ble') {
+    const bleKey = $('key-ble-key')?.value?.trim();
+    if (!bleKey) return;
+    const cf = ensurePageCommandFile();
+    cmd = $('action-ble-cmd-name')?.value?.trim()
+      || DEFAULT_CMD_FOR_KEY[selection.keyName]
+      || selection.keyName.toUpperCase();
+    try {
+      upsertBleCommand(cf, cmd, bleKey);
+    } catch (e) {
+      const msg = $('action-learn-msg');
+      if (msg) { msg.textContent = e.message; msg.className = 'msg err small'; }
+      return;
+    }
+    populateActionCmdPick(cmd);
+    renderPageCommandsPanel();
+  } else {
+    cmd = $('action-cmd-name').value.trim();
+  }
   if (!cmd) return;
   page.ButtonMaps[selection.keyName] = page.ButtonMaps[selection.keyName] || {};
   page.ButtonMaps[selection.keyName][pt] = cmd;
@@ -3749,6 +4094,7 @@ function renderCommandsTable() {
   const tbody = $('cmd-table')?.querySelector('tbody');
   if (!tbody) return;
   tbody.innerHTML = '';
+  populateBleKeySelects();
   d[key].forEach((cmd, idx) => {
     const tr = document.createElement('tr');
     const name = cmd.Command || cmd.Action || '';
@@ -3756,23 +4102,49 @@ function renderCommandsTable() {
     const proto = cmd.Protocol || '';
     const data = Array.isArray(cmd.Data) ? cmd.Data.join(', ') : '';
     tr.innerHTML = `<td><input data-f="name" value="${escapeAttr(name)}" /></td>
-      <td><select data-f="mode"><option${mode==='IR'?' selected':''}>IR</option><option${mode==='MQTT'?' selected':''}>MQTT</option></select></td>
-      <td><input data-f="proto" value="${escapeAttr(proto)}" /></td>
+      <td><select data-f="mode"><option${mode==='IR'?' selected':''}>IR</option><option${mode==='MQTT'?' selected':''}>MQTT</option><option${mode==='BLE'?' selected':''}>BLE</option></select></td>
+      <td data-f="proto-cell"></td>
       <td><input data-f="data" value="${escapeAttr(data)}" /></td>
       <td><button type="button" data-del="${idx}">×</button></td>`;
+
+    const saveRow = () => {
+      const doc = parseJson(selectedCmdFile);
+      const row = doc[key][idx];
+      row.Command = row.Command || row.Action;
+      if (key === 'Commands') {
+        row.Command = tr.querySelector('[data-f="name"]').value;
+        row.Mode = tr.querySelector('[data-f="mode"]').value;
+        row.Protocol = tr.querySelector('[data-f="proto"]')?.value || '';
+        row.Data = tr.querySelector('[data-f="data"]').value.split(',').map((s) => s.trim()).filter(Boolean);
+      }
+      setFile(selectedCmdFile, doc);
+    };
+
+    const protoCell = tr.querySelector('[data-f="proto-cell"]');
+    const modeSel = tr.querySelector('[data-f="mode"]');
+    const syncProtoField = () => {
+      const cur = parseJson(selectedCmdFile)?.[key]?.[idx]?.Protocol || proto;
+      protoCell.innerHTML = '';
+      if (modeSel.value === 'BLE') {
+        const sel = document.createElement('select');
+        sel.dataset.f = 'proto';
+        populateBleKeySelectElement(sel, cur);
+        sel.onchange = saveRow;
+        protoCell.appendChild(sel);
+      } else {
+        const inp = document.createElement('input');
+        inp.dataset.f = 'proto';
+        inp.value = cur;
+        inp.placeholder = 'Protocol';
+        inp.onchange = saveRow;
+        protoCell.appendChild(inp);
+      }
+    };
+    modeSel.onchange = () => { syncProtoField(); saveRow(); };
+    syncProtoField();
+
     tr.querySelectorAll('input,select').forEach((el) => {
-      el.onchange = () => {
-        const doc = parseJson(selectedCmdFile);
-        const row = doc[key][idx];
-        row.Command = row.Command || row.Action;
-        if (key === 'Commands') {
-          row.Command = tr.querySelector('[data-f="name"]').value;
-          row.Mode = tr.querySelector('[data-f="mode"]').value;
-          row.Protocol = tr.querySelector('[data-f="proto"]').value;
-          row.Data = tr.querySelector('[data-f="data"]').value.split(',').map((s) => s.trim()).filter(Boolean);
-        }
-        setFile(selectedCmdFile, doc);
-      };
+      if (el.dataset.f !== 'proto') el.onchange = saveRow;
     });
     tr.querySelector('[data-del]').onclick = () => {
       const doc = parseJson(selectedCmdFile);
@@ -3873,6 +4245,7 @@ function setDeployMsg(text, kind = '') {
 
 $('btn-deploy')?.addEventListener('click', async () => {
   setDeployMsg('Saving…');
+  await loadCanonicalDeviceSettingsSchema();
   const dirty = [...files.entries()].filter(([, v]) => v.dirty);
   const toDelete = [...remoteDeletes];
   if (!dirty.length && !toDelete.length) {
@@ -3886,9 +4259,19 @@ $('btn-deploy')?.addEventListener('click', async () => {
       await api('/api/fs/delete?path=' + encodeURIComponent(path), { method: 'POST', timeout: 15000 });
       remoteDeletes.delete(path);
     }
-    for (const [path, { content }] of dirty) {
+    for (const [path, entry] of dirty) {
+      let body = entry.content;
+      if (path === DEVICE_SETTINGS_SCHEMA_PATH && canonicalDeviceSettingsSchema) {
+        try {
+          const parsed = JSON.parse(body);
+          body = JSON.stringify(
+            OmoteSettingsForm.mergeProtectedSchemaSections(parsed, canonicalDeviceSettingsSchema),
+            null,
+            2);
+        } catch (_) { /* deploy raw content */ }
+      }
       await api('/api/fs/write?path=' + encodeURIComponent(path), {
-        method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: content, timeout: 30000
+        method: 'POST', headers: { 'Content-Type': 'text/plain' }, body, timeout: 30000
       });
     }
     const onlySoftReload =
@@ -3962,6 +4345,7 @@ function bindCanvasPreview() {
   }, { passive: false });
 }
 
+populateBleKeySelects();
 dismissBlockingOverlays();
 bindCanvasPreview();
 bindLayoutTools();

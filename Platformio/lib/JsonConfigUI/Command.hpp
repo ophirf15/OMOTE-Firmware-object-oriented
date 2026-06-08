@@ -9,7 +9,8 @@ namespace Command {
 typedef enum {
   NONE = 0,
   MQTT,
-  IR
+  IR,
+  BLE
 } CommandMode;
 
 using KeyIds = KeyPressAbstract::KeyId;
@@ -33,5 +34,7 @@ public:
   ~Commands() {};
   static void sendCommand(const CommandStruct &aCommandStruct);
   static CommandMode getCommand(const std::string &aCommandFIle, const std::string &aCommandPrefix, const std::string &aCommand, CommandStruct &aCommandStrings);
+  /** Drop parsed command JSON held in RAM (call before loading a new scene). */
+  static void releaseCachedDocuments();
 };
 } // namespace Command

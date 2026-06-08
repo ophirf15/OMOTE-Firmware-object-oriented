@@ -8,6 +8,7 @@
 #include "device_settings.hpp"
 #include "device_settings_schema.hpp"
 #include "display.hpp"
+#include "ble_scene.hpp"
 #include "editor_sync_mode.hpp"
 #include "ir/IRTransceiver.hpp"
 #include "LvglResourceManager.hpp"
@@ -493,6 +494,94 @@ void handleReboot() {
   sendJson(200, "{\"ok\":true,\"restart\":true}");
 }
 
+void handleBleStatusGet() {
+  if (auto ble = HardwareFactory::getAbstract().ble())
+    sendJson(200, ble->statusJson());
+  else
+    sendJson(503, "{\"error\":\"ble unavailable\"}");
+}
+
+void handleBleIdentitiesGet() {
+  if (auto ble = HardwareFactory::getAbstract().ble())
+    sendJson(200, ble->identityListJson());
+  else
+    sendJson(503, "{\"error\":\"ble unavailable\"}");
+}
+
+void handleBleIdentityPost() {
+  if (!server.hasArg("plain") && !server.hasArg("body")) {
+    sendJson(400, "{\"error\":\"missing body\"}");
+    return;
+  }
+  const std::string body =
+      server.hasArg("plain") ? server.arg("plain").c_str() : server.arg("body").c_str();
+  rapidjson::Document d;
+  if (d.Parse(body.c_str()).HasParseError() || !d.IsObject() || !d.HasMember("profile") ||
+      !d["profile"].IsString()) {
+    sendJson(400, "{\"error\":\"profile required\"}");
+    return;
+  }
+  auto &settings = device_settings::current();
+  settings.bleProfile = d["profile"].GetString();
+  if (auto ble = HardwareFactory::getAbstract().ble()) {
+    ble->setProfile(settings.bleProfile);
+    ble->forgetBonds();
+  }
+  device_settings::applyToHardware();
+  device_settings::saveToLittleFS();
+  HardwareFactory::getAbstract().saveSettings();
+  config_reload::markDeviceSettingsDirty();
+  sendJson(200, "{\"ok\":true}");
+}
+
+void handleBlePairingPost() {
+  const bool on = server.hasArg("plain") ? server.arg("plain").indexOf("\"on\":true") >= 0 : false;
+  if (auto ble = HardwareFactory::getAbstract().ble()) {
+    if (on)
+      ble->startPairingMode();
+    else
+      ble->stopPairingMode();
+    sendJson(200, "{\"ok\":true}");
+  } else
+    sendJson(503, "{\"error\":\"ble unavailable\"}");
+}
+
+void handleBleForgetPost() {
+  if (auto ble = HardwareFactory::getAbstract().ble()) {
+    ble->forgetBonds();
+    sendJson(200, "{\"ok\":true}");
+  } else
+    sendJson(503, "{\"error\":\"ble unavailable\"}");
+}
+
+void handleBleDisconnectPost() {
+  if (auto ble = HardwareFactory::getAbstract().ble()) {
+    ble->disconnectClients();
+    sendJson(200, "{\"ok\":true}");
+  } else
+    sendJson(503, "{\"error\":\"ble unavailable\"}");
+}
+
+void handleBleTestPost() {
+  if (!server.hasArg("plain") && !server.hasArg("body")) {
+    sendJson(400, "{\"error\":\"missing body\"}");
+    return;
+  }
+  const std::string body =
+      server.hasArg("plain") ? server.arg("plain").c_str() : server.arg("body").c_str();
+  rapidjson::Document d;
+  if (d.Parse(body.c_str()).HasParseError() || !d.IsObject() || !d.HasMember("key") ||
+      !d["key"].IsString()) {
+    sendJson(400, "{\"error\":\"key required\"}");
+    return;
+  }
+  if (auto ble = HardwareFactory::getAbstract().ble()) {
+    ble->sendKey(d["key"].GetString());
+    sendJson(200, "{\"ok\":true}");
+  } else
+    sendJson(503, "{\"error\":\"ble unavailable\"}");
+}
+
 void handleEditorSyncGet() {
   rapidjson::Document d;
   d.SetObject();
@@ -593,6 +682,13 @@ void registerRoutes() {
   server.on("/api/device/settings/schema", HTTP_GET, handleDeviceSettingsSchemaGet);
   server.on("/api/device/sync-mode", HTTP_GET, handleEditorSyncGet);
   server.on("/api/device/sync-mode", HTTP_POST, handleEditorSyncPost);
+  server.on("/api/ble/status", HTTP_GET, handleBleStatusGet);
+  server.on("/api/ble/identities", HTTP_GET, handleBleIdentitiesGet);
+  server.on("/api/ble/identity", HTTP_POST, handleBleIdentityPost);
+  server.on("/api/ble/pairing", HTTP_POST, handleBlePairingPost);
+  server.on("/api/ble/forget", HTTP_POST, handleBleForgetPost);
+  server.on("/api/ble/disconnect", HTTP_POST, handleBleDisconnectPost);
+  server.on("/api/ble/test", HTTP_POST, handleBleTestPost);
   server.on("/api/ir/learn/start", HTTP_POST, handleIrLearnStart);
   server.on("/api/ir/learn/stop", HTTP_POST, handleIrLearnStop);
   server.on("/api/ir/learn/poll", HTTP_GET, handleIrLearnPoll);

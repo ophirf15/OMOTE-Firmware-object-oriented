@@ -317,6 +317,9 @@ button.danger-btn:hover { background: #f8514922; }
 }
 .page-cmd-slot input { flex: 1 1 100px; min-width: 72px; }
 .page-cmd-slot select { flex: 0 0 76px; max-width: 76px; }
+.page-cmd-slot .page-cmd-ble-key { flex: 1 1 140px; min-width: 120px; max-width: none; }
+.page-cmd-slot .page-cmd-ble-key[hidden] { display: none; }
+#key-ble-key { width: 100%; max-width: 100%; }
 .page-cmd-slot.highlight {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent-dim);

@@ -325,20 +325,24 @@ void UIElement::Hide() {
   OnHide();
 }
 
+void UIElement::propagateOnHideToChildren() {
+  for (auto &elem : mContainedElements)
+    elem->OnHide();
+}
+
+void UIElement::propagateOnShowToChildren() {
+  for (auto &elem : mContainedElements)
+    elem->OnShow();
+}
+
 void UIElement::OnHide() {
-  for (auto &elem : mContainedElements) {
-    if (!IsSetVisible()) {
-      elem->OnHide();
-    }
-  }
+  if (!IsSetVisible())
+    propagateOnHideToChildren();
 }
 
 void UIElement::OnShow() {
-  for (auto &elem : mContainedElements) {
-    if (IsSetVisible()) {
-      elem->OnShow();
-    }
-  }
+  if (IsSetVisible())
+    propagateOnShowToChildren();
 }
 
 //////////////////// Statics //////////////////////////

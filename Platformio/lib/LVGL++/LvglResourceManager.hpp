@@ -38,7 +38,7 @@ protected:
 
   void HandleQueuedTasks() {
     auto lock = scopeLock();
-    static constexpr auto TasksPerRefresh = 5;
+    static constexpr auto TasksPerRefresh = 1;
     for (auto i = 0; i < TasksPerRefresh && !mLvglTasks.empty(); i++) {
       mLvglTasks.front()();
       mLvglTasks.pop();

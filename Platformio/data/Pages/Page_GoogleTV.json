@@ -1,0 +1,21 @@
+{
+  "PageName": "Google TV",
+  "ShortName": "GTV",
+  "CommandFile": "Commands/Commands_GoogleTV.json",
+  "Widgets": [
+    {"Type": "Button", "Label": "Home", "Command": "GTV_HOME", "PosX": 5, "PosY": 8, "SizeXY": [70, 36]},
+    {"Type": "Button", "Label": "Back", "Command": "GTV_BACK", "PosX": 80, "PosY": 8, "SizeXY": [70, 36]},
+    {"Type": "Button", "Label": "Netflix", "Command": "GTV_NETFLIX", "PosX": 5, "PosY": 50, "SizeXY": [70, 36]},
+    {"Type": "Button", "Label": "YouTube", "Command": "GTV_YOUTUBE", "PosX": 80, "PosY": 50, "SizeXY": [70, 36]},
+    {"Type": "Button", "Label": "Prime", "Command": "GTV_PRIME", "PosX": 155, "PosY": 50, "SizeXY": [70, 36]},
+    {"Type": "Button", "Label": "Vol+", "Command": "GTV_VOL_UP", "PosX": 5, "PosY": 92, "SizeXY": [70, 36]},
+    {"Type": "Button", "Label": "Vol-", "Command": "GTV_VOL_DOWN", "PosX": 80, "PosY": 92, "SizeXY": [70, 36]},
+    {"Type": "Button", "Label": "Mute", "Command": "GTV_MUTE", "PosX": 155, "PosY": 92, "SizeXY": [70, 36]}
+  ],
+  "ButtonMaps": {
+    "VolUp": {"Press": "GTV_VOL_UP", "Repeat": "GTV_VOL_UP"},
+    "VolDown": {"Press": "GTV_VOL_DOWN", "Repeat": "GTV_VOL_DOWN"},
+    "Mute": {"Press": "GTV_MUTE"},
+    "Stream": {"Press": "GTV_HOME"}
+  }
+}

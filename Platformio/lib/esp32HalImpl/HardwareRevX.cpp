@@ -8,6 +8,8 @@
 #include "device_settings_schema.hpp"
 #include "display.hpp"
 #include "driver/rtc_io.h"
+#include "ble_handler.hpp"
+#include "ble_scene.hpp"
 #include "editor_sync_mode.hpp"
 #include "esp32WebSocket.hpp"
 #include "esp_log.h"
@@ -203,6 +205,14 @@ std::shared_ptr<SystemStatsInterface> HardwareRevX::stats() {
 
 std::shared_ptr<webSocketInterface> HardwareRevX::webSocket() {
   return std::make_shared<esp32WebSocket>(mWifiHandler, std::make_unique<ESP32Logger>());
+}
+
+std::shared_ptr<BleHandlerInterface> HardwareRevX::ble() {
+#if OMOTE_BLE
+  if (!mBleHandler)
+    mBleHandler = createBleHandler();
+#endif
+  return mBleHandler;
 }
 
 std::shared_ptr<LIS3DH_IMU> HardwareRevX::imu() {
@@ -495,6 +505,7 @@ void HardwareRevX::loopHandler() {
   static int32_t battVoltage = 0;
 
   mWifiHandler->networkSync();
+  ble_scene::loop();
 
   const bool portalActive = mWifiHandler->isPortalActive();
   const bool editorActive = editor_sync_mode::isActive();

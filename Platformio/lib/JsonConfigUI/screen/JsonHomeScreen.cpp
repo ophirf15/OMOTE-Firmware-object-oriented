@@ -4,13 +4,16 @@
 #include "AddDevice.hpp"
 #include "HaRuntime.hpp"
 #include "HardwareFactory.hpp"
+#include "UiOverlayGate.hpp"
 #include "JsonPage.hpp"
 #include "RapidJsonUtilty.hpp"
 #include "ScreenManager.hpp"
 #include "LvglResourceManager.hpp"
 #include "SettingsPage.hpp"
+#include "ble_scene.hpp"
 #include "editor_sync_mode.hpp"
 #ifndef IS_SIMULATOR
+#include <Arduino.h>
 #include "display.hpp"
 #include "device_settings.hpp"
 #endif
@@ -82,7 +85,10 @@ JsonHomeScreen::JsonHomeScreen(DeviceFactory &aFactory)
 
 #ifndef IS_SIMULATOR
   if (RtcLastState.signature == RTC_SIG) {
-    displayScenePage(RtcLastState.currentScene, true);
+    const std::string restoredScene = RtcLastState.currentScene;
+    LvglResourceManager::GetInstance().QueueForLater([this, restoredScene]() {
+      displayScenePage(restoredScene, true);
+    });
   }
 #else
   RtcLastState.signature = 0;
@@ -116,31 +122,228 @@ bool JsonHomeScreen::checkSceneForEntryExit(const std::string &aFileName) {
           (d.HasMember("ExitCommandSequence") && d["ExitCommandSequence"].IsArray()));
 }
 
+void JsonHomeScreen::bindTabChangeHandler() {
+  mTabView->OnTabChangeEvent([this](uint16_t idx) {
+    RtcLastState.tabIdx = idx;
+    LvglResourceManager::GetInstance().QueueForLater([this, idx]() {
+      unloadInactiveTabs(idx);
+      ensureTabLoaded(idx);
+    });
+  });
+}
+
 void JsonHomeScreen::clearScene() {
+  ble_scene::disarmSceneBle();
+  Command::Commands::releaseCachedDocuments();
+  mSceneTabSpecs.clear();
+  mTabLoaded.clear();
   RemoveElement(mTabView);
   mTabView = AddNewElement<Page::TabView>(ID(ID::Pages::INVALID_PAGE_ID));
   mTabView->SetHeight(SCREEN_HEIGHT - Widget::StatusBar::Height);
   mTabView->AlignTo(mStatusBar, LV_ALIGN_OUT_BOTTOM_MID);
   mTabView->SetVisiblity(false);
-  mTabView->OnTabChangeEvent([this](uint16_t idx) { RtcLastState.tabIdx = mTabView->GetCurrentTabIdx(); });
+  bindTabChangeHandler();
   mOverrideKeyHandlers.clear();
 }
 
-void JsonHomeScreen::displayScenePage(const std::string &aFileName, bool restoreScene) {
+UI::Page::Base::Ptr JsonHomeScreen::buildTabPage(const SceneTabSpec &spec) {
+  auto page = std::make_unique<Page::JsonPage>(spec.fileName, spec.pageName, spec.commandPrefix);
+  std::string title = spec.shortName;
+  if (title.empty())
+    title = spec.pageName;
+  if (title.empty())
+    title = spec.fileName;
+  page->SetTitle(title);
+  return page;
+}
+
+void JsonHomeScreen::unregisterTabOverrides(uint16_t tabIdx) {
+  if (tabIdx >= mSceneTabSpecs.size())
+    return;
+  auto &spec = mSceneTabSpecs[tabIdx];
+  for (const auto &cached : spec.cachedOverrideHandlers) {
+    auto range = mOverrideKeyHandlers.equal_range(cached.first);
+    for (auto it = range.first; it != range.second; ++it) {
+      if (it->second.pressType == cached.second.pressType && it->second.command.mode == cached.second.command.mode &&
+          it->second.command.protocol == cached.second.command.protocol &&
+          it->second.command.data == cached.second.command.data) {
+        mOverrideKeyHandlers.erase(it);
+        break;
+      }
+    }
+  }
+  spec.cachedOverrideHandlers.clear();
+}
+
+void JsonHomeScreen::applyTabOverrides(uint16_t tabIdx, Page::JsonPage &page) {
+  if (tabIdx >= mSceneTabSpecs.size())
+    return;
+  auto &spec = mSceneTabSpecs[tabIdx];
+  if (spec.overrideKeyNames.empty())
+    return;
+  unregisterTabOverrides(tabIdx);
+  std::multimap<Command::KeyIds, Command::KeyStruct> keyHandlers;
+  page.getKeyOverrides(spec.overrideKeyNames, keyHandlers);
+  for (const auto &entry : keyHandlers)
+    spec.cachedOverrideHandlers.push_back(entry);
+  mOverrideKeyHandlers.insert(keyHandlers.begin(), keyHandlers.end());
+}
+
+void JsonHomeScreen::ensureTabLoaded(uint16_t tabIdx) {
+  if (tabIdx >= mSceneTabSpecs.size() || tabIdx >= mTabLoaded.size() || mTabLoaded[tabIdx])
+    return;
+#ifndef IS_SIMULATOR
+  Serial.printf("[Scene] load tab %u heap=%u\n", static_cast<unsigned>(tabIdx), ESP.getFreeHeap());
+#endif
+  auto page = buildTabPage(mSceneTabSpecs[tabIdx]);
+  applyTabOverrides(tabIdx, *static_cast<Page::JsonPage *>(page.get()));
+  mTabView->LoadTabContent(tabIdx, std::move(page));
+  mTabLoaded[tabIdx] = true;
+}
+
+void JsonHomeScreen::unloadInactiveTabs(uint16_t activeIdx) {
+  for (uint16_t i = 0; i < mTabLoaded.size(); i++) {
+    if (i == activeIdx || !mTabLoaded[i])
+      continue;
+    unregisterTabOverrides(i);
+    mTabView->UnloadTabContent(i);
+    mTabLoaded[i] = false;
+#ifndef IS_SIMULATOR
+    Serial.printf("[Scene] unload tab %u heap=%u\n", static_cast<unsigned>(i), ESP.getFreeHeap());
+#endif
+  }
+}
+
+bool JsonHomeScreen::activeSceneBleEnabled() const {
+  if (mLastScene.empty())
+    return false;
+  const std::filesystem::path scenePath(FS_PATH + mLastScene);
+  rapidjson::Document d = OMOTE::JSON::GetDocument(scenePath);
+  return d.HasMember("BleEnabled") && d["BleEnabled"].IsBool() && d["BleEnabled"].GetBool();
+}
+
+void JsonHomeScreen::prepareForOverlay() {
+  suspendSceneTabForOverlay();
+#ifndef IS_SIMULATOR
+  if (mTabView && mTabView->IsSetVisible())
+    ble_scene::disarmSceneBle();
+#endif
+}
+
+void JsonHomeScreen::suspendSceneTabForOverlay() {
+  if (mOverlaySuspendedTabIdx >= 0)
+    return;
+  if (!mTabView || !mTabView->IsSetVisible() || mSceneTabSpecs.empty())
+    return;
+  mTabView->OnHide();
+  const uint16_t idx = mTabView->GetCurrentTabIdx();
+  if (idx >= mTabLoaded.size() || !mTabLoaded[idx])
+    return;
+  unregisterTabOverrides(idx);
+  mTabView->UnloadTabContent(idx);
+  mTabLoaded[idx] = false;
+  mOverlaySuspendedTabIdx = static_cast<int16_t>(idx);
+  Command::Commands::releaseCachedDocuments();
+#ifndef IS_SIMULATOR
+  Serial.printf("[Scene] suspend tab %u for overlay heap=%u\n", static_cast<unsigned>(idx), ESP.getFreeHeap());
+#endif
+}
+
+void JsonHomeScreen::resumeSceneTabAfterOverlay() {
+  if (mOverlaySuspendedTabIdx < 0 || !mTabView || !mTabView->IsSetVisible())
+    return;
+  const uint16_t idx = static_cast<uint16_t>(mOverlaySuspendedTabIdx);
+  mOverlaySuspendedTabIdx = -1;
+  LvglResourceManager::GetInstance().QueueForLater([this, idx]() {
+    ensureTabLoaded(idx);
+    mTabView->OnShow();
+#ifndef IS_SIMULATOR
+    if (activeSceneBleEnabled())
+      ble_scene::armSceneBle(true);
+    Serial.printf("[Scene] resume tab %u after overlay heap=%u\n", static_cast<unsigned>(idx), ESP.getFreeHeap());
+#endif
+  });
+}
+
+void JsonHomeScreen::setupLazySceneTabs(std::vector<SceneTabSpec> specs, SceneFinishParams finish) {
+  mSceneTabSpecs = std::move(specs);
+  mTabLoaded.assign(mSceneTabSpecs.size(), false);
+  for (const auto &spec : mSceneTabSpecs) {
+    std::string title = spec.shortName;
+    if (title.empty())
+      title = spec.pageName;
+    if (title.empty())
+      title = spec.fileName;
+    mTabView->AddPlaceholderTab(title);
+  }
+  finalizeSceneDisplay(finish);
+}
+
+void JsonHomeScreen::finalizeSceneDisplay(const SceneFinishParams &params) {
+  mLastScene = params.fileName;
+
+  if (params.restoreScene) {
+    mTabView->SetCurrentTabIdx(params.tabIdx, LV_ANIM_OFF);
+    HardwareFactory::getAbstract().setInScene(true);
+  } else {
+    RtcLastState.signature = RTC_SIG;
+    strncpy(RtcLastState.currentScene, params.fileName.c_str(), RTC_STR_SIZE);
+    RtcLastState.tabIdx = params.tabIdx;
+    HardwareFactory::getAbstract().setInScene(true);
+  }
+
+  unloadInactiveTabs(params.tabIdx);
+  ensureTabLoaded(params.tabIdx);
+
+  if (params.showScene) {
+    mTabView->SetVisiblity(true);
+    mList->SetVisiblity(false);
+    lv_obj_fade_in(mTabView->LvglSelf(), 400, 0);
+    mTabView->OnShow();
+  } else {
+    mTabView->SetVisiblity(false);
+    mList->SetVisiblity(true);
+  }
+  ble_scene::armSceneBle(params.bleEnabled);
+#ifndef IS_SIMULATOR
+  Serial.printf("[Scene] ready %s tabs=%u loaded=%u heap=%u\n", params.fileName.c_str(),
+                static_cast<unsigned>(mTabView->TabCount()),
+                static_cast<unsigned>(mTabView->HasTabContent(params.tabIdx) ? 1 : 0),
+                ESP.getFreeHeap());
+#endif
+}
+
+void JsonHomeScreen::displayScenePage(const std::string &aFileName, bool restoreScene, bool showScene) {
   std::filesystem::path aFilePath(FS_PATH + aFileName);
   rapidjson::Document d = OMOTE::JSON::GetDocument(aFilePath);
 
-  if (d.HasParseError() || d.IsNull())
-    return; // file error, nothing to do
+  if (d.HasParseError() || d.IsNull()) {
+#ifndef IS_SIMULATOR
+    Serial.printf("[Scene] failed to parse %s\n", aFileName.c_str());
+#endif
+    return;
+  }
+
+#ifndef IS_SIMULATOR
+  Serial.printf("[Scene] opening %s heap=%u\n", aFileName.c_str(), ESP.getFreeHeap());
+#endif
+
+  bool bleEnabled = false;
+  if (d.HasMember("BleEnabled") && d["BleEnabled"].IsBool())
+    bleEnabled = d["BleEnabled"].GetBool();
 
   if (mLastScene == aFileName) {
     mTabView->SetVisiblity(true);
     mList->SetVisiblity(false);
     lv_obj_fade_in(mTabView->LvglSelf(), 400, 0);
+    ble_scene::armSceneBle(bleEnabled);
     return; // no scene change, just bring existing tabview back up
   }
 
-  if (!mExitCommands.empty() && (mSavedExitSeq != aFileName) && checkSceneForEntryExit(aFileName)) {
+  const bool newSceneHasEntryExit =
+      (d.HasMember("StartCommandSequence") && d["StartCommandSequence"].IsArray()) ||
+      (d.HasMember("ExitCommandSequence") && d["ExitCommandSequence"].IsArray());
+  if (!mExitCommands.empty() && (mSavedExitSeq != aFileName) && newSceneHasEntryExit) {
     // if we have an exit sequence to use, which isn't for the new scene, and the new scene uses entry or exit sequences then send it
     sendExitSequence();
     // Serial.println("Sending Exit commands");
@@ -155,42 +358,20 @@ void JsonHomeScreen::displayScenePage(const std::string &aFileName, bool restore
   } else
     mStatusBar->SetTopButtonLabel(aFileName);
 
-  if (d.HasMember("Pages") && d["Pages"].IsArray()) {
-    for (rapidjson::SizeType i = 0; i < d["Pages"].Size(); i++) {
-      if (d["Pages"][i].HasMember("FileName") && d["Pages"][i]["FileName"].IsString()) {
-        std::string fileName = d["Pages"][i]["FileName"].GetString();
-        std::string pageName;
-        std::string shortName;
-        if (d["Pages"][i].HasMember("PageName") && d["Pages"][i]["PageName"].IsString())
-          pageName = d["Pages"][i]["PageName"].GetString();
-        else
-          pageName = fileName;
-        if (d["Pages"][i].HasMember("ShortName") && d["Pages"][i]["ShortName"].IsString())
-          shortName = d["Pages"][i]["ShortName"].GetString();
-        std::string commandPrefix;
-        if (d["Pages"][i].HasMember("CommandPrefix") && d["Pages"][i]["CommandPrefix"].IsString())
-          commandPrefix = d["Pages"][i]["CommandPrefix"].GetString();
-
-        auto page = std::make_unique<Page::JsonPage>(fileName, pageName, commandPrefix);
-        if (d["Pages"][i].HasMember("OverrideKeys") && d["Pages"][i]["OverrideKeys"].IsArray()) {
-          auto array = d["Pages"][i]["OverrideKeys"].GetArray();
-          std::multimap<Command::KeyIds, Command::KeyStruct> keyHandlers;
-          page->getKeyOverrides(array, keyHandlers);
-          mOverrideKeyHandlers.insert(keyHandlers.begin(), keyHandlers.end());
-        }
-        page->SetTitle(shortName);
-        mTabView->AddTab(std::move(page));
-      }
-    }
-  }
-
-  if ((mLastStartSeq != aFileName) && !restoreScene && d.HasMember("StartCommandSequence") && d["StartCommandSequence"].IsArray()) {
+  // Run command sequences before building LVGL pages — parsing command JSON while
+  // several JsonPages are alive can exhaust heap and crash in RapidJSON.
+  if ((mLastStartSeq != aFileName) && !restoreScene && d.HasMember("StartCommandSequence") &&
+      d["StartCommandSequence"].IsArray()) {
     for (rapidjson::SizeType i = 0; i < d["StartCommandSequence"].Size(); i++) {
-      if (d["StartCommandSequence"][i].HasMember("CommandFile") && d["StartCommandSequence"][i]["CommandFile"].IsString()) {
-        if (d["StartCommandSequence"][i].HasMember("Command") && d["StartCommandSequence"][i]["Command"].IsString()) {
+      if (d["StartCommandSequence"][i].HasMember("CommandFile") &&
+          d["StartCommandSequence"][i]["CommandFile"].IsString()) {
+        if (d["StartCommandSequence"][i].HasMember("Command") &&
+            d["StartCommandSequence"][i]["Command"].IsString()) {
           Command::CommandStruct aCommand;
-          if (Command::NONE != Command::Commands::getCommand(d["StartCommandSequence"][i]["CommandFile"].GetString(), "",
-                                                             d["StartCommandSequence"][i]["Command"].GetString(), aCommand)) {
+          if (Command::NONE != Command::Commands::getCommand(d["StartCommandSequence"][i]["CommandFile"].GetString(),
+                                                             "",
+                                                             d["StartCommandSequence"][i]["Command"].GetString(),
+                                                             aCommand)) {
             Command::Commands::sendCommand(aCommand);
             mLastStartSeq = aFileName;
           }
@@ -199,13 +380,17 @@ void JsonHomeScreen::displayScenePage(const std::string &aFileName, bool restore
     }
   }
 
-  if (mExitCommands.empty() && d.HasMember("ExitCommandSequence") && d["ExitCommandSequence"].IsArray()) { // don't add if reloading
+  if (mExitCommands.empty() && d.HasMember("ExitCommandSequence") && d["ExitCommandSequence"].IsArray()) {
     for (rapidjson::SizeType i = 0; i < d["ExitCommandSequence"].Size(); i++) {
-      if (d["ExitCommandSequence"][i].HasMember("CommandFile") && d["ExitCommandSequence"][i]["CommandFile"].IsString()) {
-        if (d["ExitCommandSequence"][i].HasMember("Command") && d["ExitCommandSequence"][i]["Command"].IsString()) {
+      if (d["ExitCommandSequence"][i].HasMember("CommandFile") &&
+          d["ExitCommandSequence"][i]["CommandFile"].IsString()) {
+        if (d["ExitCommandSequence"][i].HasMember("Command") &&
+            d["ExitCommandSequence"][i]["Command"].IsString()) {
           Command::CommandStruct aCommand;
-          if (Command::NONE != Command::Commands::getCommand(d["ExitCommandSequence"][i]["CommandFile"].GetString(), "",
-                                                             d["ExitCommandSequence"][i]["Command"].GetString(), aCommand)) {
+          if (Command::NONE != Command::Commands::getCommand(d["ExitCommandSequence"][i]["CommandFile"].GetString(),
+                                                             "",
+                                                             d["ExitCommandSequence"][i]["Command"].GetString(),
+                                                             aCommand)) {
             mExitCommands.push_back(aCommand);
             mSavedExitSeq = aFileName;
           }
@@ -214,25 +399,42 @@ void JsonHomeScreen::displayScenePage(const std::string &aFileName, bool restore
     }
   }
 
-  mLastScene = aFileName;
-
-  if (restoreScene) {
-    // Serial.printf("Restoring tab: %d\r\n", RtcLastState.tabIdx);
-    mTabView->SetCurrentTabIdx(RtcLastState.tabIdx, LV_ANIM_OFF);
-    // needed when waking from deep sleep but then enabling light sleep
-    HardwareFactory::getAbstract().setInScene(true);
-  } else {
-    RtcLastState.signature = RTC_SIG;
-    strncpy(RtcLastState.currentScene, aFileName.c_str(), RTC_STR_SIZE);
-    RtcLastState.tabIdx = 0;
-    HardwareFactory::getAbstract().setInScene(true);
-    //  Serial.printf("Restore scene set to: %s\r\n",RtcLastState.currentScene);
+  std::vector<SceneTabSpec> tabSpecs;
+  if (d.HasMember("Pages") && d["Pages"].IsArray()) {
+    for (rapidjson::SizeType i = 0; i < d["Pages"].Size(); i++) {
+      if (!d["Pages"][i].HasMember("FileName") || !d["Pages"][i]["FileName"].IsString())
+        continue;
+      SceneTabSpec spec;
+      spec.fileName = d["Pages"][i]["FileName"].GetString();
+      if (d["Pages"][i].HasMember("PageName") && d["Pages"][i]["PageName"].IsString())
+        spec.pageName = d["Pages"][i]["PageName"].GetString();
+      else
+        spec.pageName = spec.fileName;
+      if (d["Pages"][i].HasMember("ShortName") && d["Pages"][i]["ShortName"].IsString())
+        spec.shortName = d["Pages"][i]["ShortName"].GetString();
+      if (d["Pages"][i].HasMember("CommandPrefix") && d["Pages"][i]["CommandPrefix"].IsString())
+        spec.commandPrefix = d["Pages"][i]["CommandPrefix"].GetString();
+      if (d["Pages"][i].HasMember("OverrideKeys") && d["Pages"][i]["OverrideKeys"].IsArray()) {
+        const auto array = d["Pages"][i]["OverrideKeys"].GetArray();
+        for (rapidjson::SizeType j = 0; j < array.Size(); j++) {
+          if (array[j].IsString())
+            spec.overrideKeyNames.emplace_back(array[j].GetString());
+        }
+      }
+      tabSpecs.push_back(std::move(spec));
+    }
   }
 
-  mTabView->SetVisiblity(true);
-  mList->SetVisiblity(false);
-  lv_obj_fade_in(mTabView->LvglSelf(), 400, 0);
-  mTabView->OnShow();
+  SceneFinishParams finish;
+  finish.fileName = aFileName;
+  finish.restoreScene = restoreScene;
+  finish.bleEnabled = bleEnabled;
+  finish.tabIdx = restoreScene ? RtcLastState.tabIdx : 0;
+  finish.showScene = showScene;
+  LvglResourceManager::GetInstance().QueueForLater([this, tabSpecs = std::move(tabSpecs),
+                                                    finish = std::move(finish)]() mutable {
+    setupLazySceneTabs(std::move(tabSpecs), std::move(finish));
+  });
 }
 
 void JsonHomeScreen::AddPage(Page::Base::Ptr aPage) {
@@ -272,7 +474,9 @@ bool JsonHomeScreen::OnKeyEvent(KeyPressAbstract::KeyEvent aKeyEvent) {
     if (range.first != mSceneKeyHandlers.end()) {
       for (auto i = range.first; i != range.second; ++i) {
         if (i->second.pressType == aKeyEvent.mType) {
-          displayScenePage(i->second.ScreenFileName, false);
+          LvglResourceManager::GetInstance().QueueForLater([this, file = i->second.ScreenFileName]() {
+            displayScenePage(file, false);
+          });
           return true;
         }
       }
@@ -340,7 +544,11 @@ void JsonHomeScreen::populateSceneListFromDisk() {
       sceneName = fileName;
 
     const auto symbol = checkSceneForEntryExit(fileName) ? LV_SYMBOL_WIFI : LV_SYMBOL_MINUS;
-    mList->AddItem(sceneName, symbol, [this, fileName] { displayScenePage(fileName, false); });
+    mList->AddItem(sceneName, symbol, [this, fileName] {
+      LvglResourceManager::GetInstance().QueueForLater([this, fileName]() {
+        displayScenePage(fileName, false);
+      });
+    });
 
     if (scene.HasMember("BindToKey") && scene["BindToKey"].IsString() &&
         scene.HasMember("PressType") && scene["PressType"].IsString()) {
@@ -402,14 +610,8 @@ void JsonHomeScreen::reloadCurrentSceneFromDisk() {
     std::fflush(stderr);
   }
 #else
-  displayScenePage(scene, false);
-  if (wasVisible) {
-    mTabView->SetCurrentTabIdx(tabIdx, LV_ANIM_OFF);
-    mTabView->OnShow();
-  } else {
-    mTabView->SetVisiblity(false);
-    mList->SetVisiblity(true);
-  }
+  RtcLastState.tabIdx = tabIdx;
+  displayScenePage(scene, true, wasVisible);
 #endif
 #ifndef IS_SIMULATOR
   device_settings::notifyActivity();
@@ -419,12 +621,30 @@ void JsonHomeScreen::reloadCurrentSceneFromDisk() {
 }
 
 void JsonHomeScreen::GoToSceneSelection(const std::string &aNewScene) {
-  // Can't get clickable to work, assume it only sets parent not children
-  // lv_obj_remove_flag(mTabView->LvglSelf(), LV_OBJ_FLAG_CLICKABLE);
-  // lv_obj_fade_out(mTabView->LvglSelf(), 100, 0);
+  ble_scene::disarmSceneBle();
+  if (mTabView->IsSetVisible())
+    mTabView->OnHide();
   mTabView->SetVisiblity(false);
   mList->SetVisiblity(true);
   lv_obj_fade_in(mList->LvglSelf(), 400, 0);
+}
+
+void JsonHomeScreen::OnHide() {
+  UiOverlayGate::setActive(true);
+  prepareForOverlay();
+  if (mTabView)
+    lv_anim_delete(mTabView->LvglSelf(), nullptr);
+  if (mList)
+    lv_anim_delete(mList->LvglSelf(), nullptr);
+  Base::OnHide();
+}
+
+void JsonHomeScreen::OnShow() {
+  Base::OnShow();
+  if (Screen::Manager::getInstance().screenStackDepth() <= 1) {
+    UiOverlayGate::setActive(false);
+    resumeSceneTabAfterOverlay();
+  }
 }
 
 void JsonHomeScreen::OnLvglEvent(lv_event_t *aEvent) {

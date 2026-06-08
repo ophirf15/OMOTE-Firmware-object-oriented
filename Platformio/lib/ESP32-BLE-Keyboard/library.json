@@ -1,0 +1,11 @@
+{
+  "name": "ESP32-BLE-Keyboard",
+  "version": "0.3.2",
+  "description": "Omote fork — BLE HID keyboard/gamepad/consumer reports for Google TV",
+  "keywords": "ble, hid, nimble",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": {
+    "h2zero/NimBLE-Arduino": "^1.4.3"
+  }
+}

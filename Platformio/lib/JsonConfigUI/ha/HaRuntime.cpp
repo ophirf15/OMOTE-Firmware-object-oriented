@@ -63,6 +63,7 @@ uint32_t gLastCacheSaveMs = 0;
 bool gDirtyCache = false;
 
 volatile bool gUiRefreshPending = false;
+bool gOverlayActive = false;
 
 
 
@@ -215,11 +216,9 @@ void upsertState(const std::string &entityId, const std::string &state, const st
     }
 
     if (changed) {
-
       gDirtyCache = true;
-
-      gUiRefreshPending = true;
-
+      if (!gOverlayActive)
+        gUiRefreshPending = true;
     }
 
     return;
@@ -233,9 +232,8 @@ void upsertState(const std::string &entityId, const std::string &state, const st
   gStates.push_back({entityId, state, attributesJson});
 
   gDirtyCache = true;
-
-  gUiRefreshPending = true;
-
+  if (!gOverlayActive)
+    gUiRefreshPending = true;
 }
 
 
@@ -294,7 +292,7 @@ void tick() {
 
   const uint32_t now = millis();
   static uint32_t sLastSettingsReload = 0;
-  if (now - sLastSettingsReload >= 30000) {
+  if (!gOverlayActive && now - sLastSettingsReload >= 30000) {
     sLastSettingsReload = now;
     refreshSettings();
   }
@@ -302,12 +300,12 @@ void tick() {
   if (!configured())
     return;
 
-  if (gUiRefreshPending && gActivePage) {
+  if (!gOverlayActive && gUiRefreshPending && gActivePage) {
     gUiRefreshPending = false;
     gActivePage->applyHaStates();
   }
 
-  if (gDirtyCache && now - gLastCacheSaveMs >= kCacheSaveMs)
+  if (!gOverlayActive && gDirtyCache && now - gLastCacheSaveMs >= kCacheSaveMs)
     saveStateCacheFile();
 }
 
@@ -430,9 +428,12 @@ bool stateIsOn(const std::string &entityId, const std::string &state) {
 
 
 void setActivePage(UI::Page::JsonPage *page, const std::vector<std::string> &entityIds) {
+  if (gOverlayActive && page != nullptr)
+    return;
   gActivePage = page;
   gActiveEntities = entityIds;
-  refreshSettings();
+  // Settings are loaded at init() and refreshed periodically in tick(); re-parsing
+  // HaSettings.json here ran on every tab switch and could panic when heap was low.
   if (configured())
     pushSubscription();
 }
@@ -440,18 +441,30 @@ void setActivePage(UI::Page::JsonPage *page, const std::vector<std::string> &ent
 
 
 void requestRefresh() {
+  if (gOverlayActive)
+    return;
 
   if (gActivePage)
-
     gActivePage->applyHaStates();
 
   if (configured())
-
     pushSubscription();
-
 }
 
+void setOverlayActive(bool active) {
+  if (gOverlayActive == active)
+    return;
+  gOverlayActive = active;
+  if (active) {
+    gUiRefreshPending = false;
+    gActivePage = nullptr;
+    gActiveEntities.clear();
+    if (configured())
+      pushSubscription();
+  }
+}
 
+bool overlayActive() { return gOverlayActive; }
 
 } // namespace HaRuntime
 

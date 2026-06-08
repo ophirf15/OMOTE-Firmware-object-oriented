@@ -24,6 +24,8 @@ public:
 
   bool distributeKeyEvent(KeyPressAbstract::KeyEvent aKeyEvent);
 
+  size_t screenStackDepth() const { return mScreens.size(); }
+
   static void setAllScreenProcessKeys(bool state) { allScreenProcessKeys = state; };
 
 private:

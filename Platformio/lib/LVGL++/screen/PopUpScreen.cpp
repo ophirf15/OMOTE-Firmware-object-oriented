@@ -46,13 +46,9 @@ bool PopUpScreen::OnKeyEvent(KeyPressAbstract::KeyEvent aKeyEvent) {
 
 void PopUpScreen::OnShow() {
   Base::OnShow();
-  if (mContentPage)
-    mContentPage->OnShow();
 }
 
 void PopUpScreen::OnHide() {
-  if (mContentPage)
-    mContentPage->OnHide();
   Base::OnHide();
 }
 

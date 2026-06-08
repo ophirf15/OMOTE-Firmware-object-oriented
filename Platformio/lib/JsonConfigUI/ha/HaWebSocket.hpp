@@ -25,4 +25,8 @@ bool fetchEntityStateRest(const std::string &entityId, std::string &stateOut, st
 
 void setStateCallback(StateCallback cb);
 
+/** Drop the HA websocket while BLE is starting (frees internal RAM). */
+void suspendForBlePairing();
+void resumeAfterBlePairing();
+
 } // namespace HaWebSocket

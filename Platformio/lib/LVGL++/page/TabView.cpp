@@ -7,9 +7,46 @@
 
 using namespace UI::Page;
 
+Tab::Tab(lv_obj_t *aTab)
+    : Base(aTab, UI::ID(UI::ID::Pages::INVALID_PAGE_ID)), mContent(nullptr) {}
+
 Tab::Tab(lv_obj_t *aTab, Base::Ptr aContent)
     : Base(aTab, aContent->GetID()),
       mContent(AddElement(std::move(aContent))) {}
+
+void Tab::SetContent(Base::Ptr aContent) {
+  if (mContent || !aContent)
+    return;
+  mContent = AddElement(std::move(aContent));
+}
+
+void Tab::ClearContent() {
+  if (!mContent)
+    return;
+  mContent->OnHide();
+  RemoveElement(mContent);
+  mContent = nullptr;
+}
+
+void Tab::OnShow() {
+  if (mContent)
+    mContent->OnShow();
+}
+
+void Tab::OnHide() {
+  if (mContent)
+    mContent->OnHide();
+}
+
+UI::ID Tab::GetID() {
+  return mContent ? mContent->GetID() : UI::ID(UI::ID::Pages::INVALID_PAGE_ID);
+}
+
+bool Tab::KeyEvent(KeyPressAbstract::KeyEvent aKeyEvent) {
+  if (mContent)
+    return mContent->KeyEvent(aKeyEvent);
+  return false;
+}
 
 /////////////////////TabView/////////////////////////////////////
 
@@ -19,19 +56,41 @@ TabView::TabView(ID aId)
   lv_tabview_set_tab_bar_position(LvglSelf(), LV_DIR_BOTTOM);
 }
 
-void TabView::AddTab(Page::Base::Ptr aPage) {
-  auto lTab = lv_tabview_add_tab(LvglSelf(), aPage->GetTitle().c_str());
-  {
-    auto lock = LvglResourceManager::GetInstance().scopeLock();
-    lv_obj_remove_flag(lTab, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
-    lv_obj_remove_flag(lTab, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
-    lv_obj_remove_flag(lTab, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scroll_dir(lTab, LV_DIR_NONE);
-    lv_obj_set_scrollbar_mode(lTab, LV_SCROLLBAR_MODE_OFF);
-  }
-  auto tab = std::make_unique<Tab>(lTab, std::move(aPage));
+static void configureTabPanel(lv_obj_t *lTab) {
+  auto lock = LvglResourceManager::GetInstance().scopeLock();
+  lv_obj_remove_flag(lTab, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+  lv_obj_remove_flag(lTab, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
+  lv_obj_remove_flag(lTab, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scroll_dir(lTab, LV_DIR_NONE);
+  lv_obj_set_scrollbar_mode(lTab, LV_SCROLLBAR_MODE_OFF);
+}
 
-  mTabs.push_back(std::move(tab));
+void TabView::AddPlaceholderTab(const std::string &title) {
+  auto *lTab = lv_tabview_add_tab(LvglSelf(), title.c_str());
+  configureTabPanel(lTab);
+  mTabs.push_back(std::make_unique<Tab>(lTab));
+}
+
+void TabView::AddTab(Page::Base::Ptr aPage) {
+  auto *lTab = lv_tabview_add_tab(LvglSelf(), aPage->GetTitle().c_str());
+  configureTabPanel(lTab);
+  mTabs.push_back(std::make_unique<Tab>(lTab, std::move(aPage)));
+}
+
+void TabView::LoadTabContent(uint16_t aTabIdx, Page::Base::Ptr aPage) {
+  if (aTabIdx >= mTabs.size())
+    return;
+  mTabs[aTabIdx]->SetContent(std::move(aPage));
+}
+
+void TabView::UnloadTabContent(uint16_t aTabIdx) {
+  if (aTabIdx >= mTabs.size())
+    return;
+  mTabs[aTabIdx]->ClearContent();
+}
+
+bool TabView::HasTabContent(uint16_t aTabIdx) const {
+  return aTabIdx < mTabs.size() && mTabs[aTabIdx]->HasContent();
 }
 
 uint16_t TabView::GetCurrentTabIdx() {
@@ -44,9 +103,6 @@ void TabView::SetCurrentTabIdx(uint16_t aTabToSetActive,
 }
 
 void TabView::HandleTabChange() {
-  // Call OnShow() for the page we just swapped to in order to
-  // Notify the page that it is now showing and the other that the are now
-  // hidden
   for (int i = 0; i < mTabs.size(); i++) {
     if (GetCurrentTabIdx() == i) {
       mTabs[i]->OnShow();

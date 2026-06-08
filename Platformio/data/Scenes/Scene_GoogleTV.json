@@ -1,0 +1,8 @@
+{
+  "Type": "Scene",
+  "ScreenName": "Google TV",
+  "BleEnabled": true,
+  "Pages": [
+    {"PageName": "Google TV", "ShortName": "GTV", "FileName": "Pages/Page_GoogleTV.json"}
+  ]
+}

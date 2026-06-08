@@ -11,6 +11,7 @@
 #include "PopUpScreen.hpp"
 #include "ScreenManager.hpp"
 #include "Slider.hpp"
+#include "BleSettings.hpp"
 #include "SystemSettings.hpp"
 #include "WifiSettings.hpp"
 #include "device_settings_schema.hpp"
@@ -49,6 +50,8 @@ const char *menuIconForSection(const rapidjson::Value &section) {
       return LV_SYMBOL_CHARGE;
     if (strcmp(name, "usb") == 0)
       return LV_SYMBOL_USB;
+    if (strcmp(name, "bluetooth") == 0)
+      return LV_SYMBOL_BLUETOOTH;
     if (strcmp(name, "close") == 0)
       return LV_SYMBOL_CLOSE;
     return LV_SYMBOL_SETTINGS;
@@ -65,6 +68,8 @@ const char *menuIconForSection(const rapidjson::Value &section) {
       return LV_SYMBOL_REFRESH;
     if (strcmp(id, "ftp") == 0)
       return LV_SYMBOL_DIRECTORY;
+    if (strcmp(id, "bluetooth") == 0)
+      return LV_SYMBOL_BLUETOOTH;
   }
 
   return LV_SYMBOL_SETTINGS;
@@ -78,7 +83,12 @@ SettingsPage::SettingsPage()
   mSettingsList->AddItem("Backlight", LV_SYMBOL_SETTINGS, [this] { PushDisplaySettings(); }, SettingItemHeight);
   mSettingsList->AddItem("Device", LV_SYMBOL_SETTINGS, [this] { PushSystemSettings(); }, mHeight);
 
-  device_settings_schema::loadFromLittleFS();
+  mSettingsList->AddItem("Bluetooth", LV_SYMBOL_BLUETOOTH, [] {
+    UI::Screen::Manager::getInstance().pushPopUp(std::make_unique<BleSettings>());
+  }, SettingItemHeight);
+
+  if (!device_settings_schema::isLoaded())
+    device_settings_schema::loadFromLittleFS();
   const auto &schema = device_settings_schema::document();
   if (schema.IsObject() && schema.HasMember("sections") && schema["sections"].IsArray()) {
     const auto &sections = schema["sections"];
@@ -86,13 +96,15 @@ SettingsPage::SettingsPage()
       const auto &section = sections[i];
       if (!section.IsObject() || !section.HasMember("id") || !section["id"].IsString())
         continue;
+      const std::string sectionId = section["id"].GetString();
+      if (sectionId == "bluetooth")
+        continue;
       const char *placement =
           section.HasMember("placement") && section["placement"].IsString()
               ? section["placement"].GetString()
               : "submenu";
       if (strcmp(placement, "menu") != 0)
         continue;
-      const std::string sectionId = section["id"].GetString();
       const std::string sectionTitle =
           (section.HasMember("menu_title") && section["menu_title"].IsString())
               ? section["menu_title"].GetString()

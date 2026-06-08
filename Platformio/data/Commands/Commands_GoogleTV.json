@@ -1,0 +1,25 @@
+{
+  "Manufacturer": "Google TV",
+  "DeviceClass": "Streaming",
+  "Commands": [
+    {"Command": "GTV_UP", "Mode": "BLE", "Protocol": "UP", "Data": []},
+    {"Command": "GTV_DOWN", "Mode": "BLE", "Protocol": "DOWN", "Data": []},
+    {"Command": "GTV_LEFT", "Mode": "BLE", "Protocol": "LEFT", "Data": []},
+    {"Command": "GTV_RIGHT", "Mode": "BLE", "Protocol": "RIGHT", "Data": []},
+    {"Command": "GTV_OK", "Mode": "BLE", "Protocol": "DPAD_CENTER", "Data": []},
+    {"Command": "GTV_BACK", "Mode": "BLE", "Protocol": "BACK", "Data": []},
+    {"Command": "GTV_HOME", "Mode": "BLE", "Protocol": "HOME", "Data": []},
+    {"Command": "GTV_VOL_UP", "Mode": "BLE", "Protocol": "VOLUME_UP", "Data": []},
+    {"Command": "GTV_VOL_DOWN", "Mode": "BLE", "Protocol": "VOLUME_DOWN", "Data": []},
+    {"Command": "GTV_MUTE", "Mode": "BLE", "Protocol": "MUTE", "Data": []},
+    {"Command": "GTV_PLAY_PAUSE", "Mode": "BLE", "Protocol": "PLAY_PAUSE", "Data": []},
+    {"Command": "GTV_NETFLIX", "Mode": "BLE", "Protocol": "NETFLIX", "Data": []},
+    {"Command": "GTV_YOUTUBE", "Mode": "BLE", "Protocol": "YOUTUBE", "Data": []},
+    {"Command": "GTV_PRIME", "Mode": "BLE", "Protocol": "PRIME_VIDEO", "Data": []},
+    {"Command": "GTV_DISNEY", "Mode": "BLE", "Protocol": "DISNEY_PLUS", "Data": []},
+    {"Command": "GTV_GUIDE", "Mode": "BLE", "Protocol": "GUIDE", "Data": []},
+    {"Command": "GTV_NOTIFICATION", "Mode": "BLE", "Protocol": "NOTIFICATION", "Data": []},
+    {"Command": "GTV_PROFILE", "Mode": "BLE", "Protocol": "PROFILE_SWITCH", "Data": []},
+    {"Command": "GTV_POWER", "Mode": "BLE", "Protocol": "POWER", "Data": []}
+  ]
+}

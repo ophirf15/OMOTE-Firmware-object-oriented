@@ -1,5 +1,6 @@
 #include "device_settings.hpp"
 
+#include "ble_scene.hpp"
 #include "HardwareFactory.hpp"
 #include "HardwareAbstract.hpp"
 #include "RapidJsonUtilty.hpp"
@@ -26,6 +27,7 @@ namespace {
 Settings sSettings;
 uint32_t sLastActivityMs = 0;
 bool sScreenPoweredOff = false;
+bool sLoadedFromDisk = false;
 
 std::string vfsPath(const char *rel) {
   std::string base = FS_PATH;
@@ -133,16 +135,20 @@ bool mergeFromJson(const rapidjson::Value &doc) {
   tryGetString(doc, "ftp_mdns_name", sSettings.ftpMdnsName);
   tryGetString(doc, "ftp_user", sSettings.ftpUser);
   tryGetString(doc, "ftp_password", sSettings.ftpPassword);
+  tryGetString(doc, "ble_profile", sSettings.bleProfile);
 
   clampDeepSleep();
   return true;
 }
 
-bool loadFromLittleFS() {
+bool loadFromLittleFS(bool forceReload) {
+  if (!forceReload && sLoadedFromDisk)
+    return true;
   const auto doc = OMOTE::JSON::GetDocument(std::filesystem::path(FS_PATH "DeviceSettings.json"));
   if (doc.HasParseError() || !doc.IsObject())
     return false;
-  return mergeFromJson(doc);
+  sLoadedFromDisk = mergeFromJson(doc);
+  return sLoadedFromDisk;
 }
 
 rapidjson::Document toJsonDocument() {
@@ -174,6 +180,7 @@ rapidjson::Document toJsonDocument() {
   d.AddMember("ftp_mdns_name", rapidjson::Value(sSettings.ftpMdnsName.c_str(), a), a);
   d.AddMember("ftp_user", rapidjson::Value(sSettings.ftpUser.c_str(), a), a);
   d.AddMember("ftp_password", rapidjson::Value(sSettings.ftpPassword.c_str(), a), a);
+  d.AddMember("ble_profile", rapidjson::Value(sSettings.bleProfile.c_str(), a), a);
   return d;
 }
 
@@ -206,6 +213,7 @@ bool saveToLittleFS() {
   d.AddMember("ftp_mdns_name", rapidjson::Value(sSettings.ftpMdnsName.c_str(), a), a);
   d.AddMember("ftp_user", rapidjson::Value(sSettings.ftpUser.c_str(), a), a);
   d.AddMember("ftp_password", rapidjson::Value(sSettings.ftpPassword.c_str(), a), a);
+  d.AddMember("ble_profile", rapidjson::Value(sSettings.bleProfile.c_str(), a), a);
 
   std::ofstream out(vfsPath("DeviceSettings.json"), std::ios::out | std::ios::trunc);
   if (!out)
@@ -293,6 +301,8 @@ void syncFromHardware() {
     sSettings.ftpUser = wifi->ftpGetUser();
     sSettings.ftpPassword = wifi->ftpGetPassword();
   }
+  if (auto ble = hw.ble())
+    sSettings.bleProfile = ble->currentProfile();
   clampDeepSleep();
 }
 
@@ -305,6 +315,7 @@ void notifyActivity() {
     if (needWake) {
       sScreenPoweredOff = false;
       disp->wake();
+      ble_scene::onDisplayWake();
     } else {
       disp->pokeTouchController();
     }

@@ -19,6 +19,9 @@ public:
   StatusBar(DeviceFactory &factory);
   ~StatusBar() override;
 
+  void OnShow() override;
+  void OnHide() override;
+
   void AddExtraSettingItem(UI::Page::SettingsPage::InjectedItem aItem);
   void AddDebugSettingItem(UI::Page::SettingsPage::InjectedItem aItem);
 

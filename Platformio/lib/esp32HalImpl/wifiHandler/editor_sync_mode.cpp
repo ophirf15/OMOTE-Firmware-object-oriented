@@ -2,6 +2,7 @@
 
 #include "editor_sync_mode.hpp"
 
+#include "ble_scene.hpp"
 #include "HardwareFactory.hpp"
 #include "device_settings.hpp"
 #include "display.hpp"
@@ -46,6 +47,8 @@ bool enter(bool showOverlay) {
   if (auto *ir = static_cast<IRTransceiver *>(hw.ir().get()))
     ir->disableRx();
 
+  ble_scene::setEditorSyncActive(true);
+
   device_settings::notifyActivity();
   if (auto disp = std::static_pointer_cast<Display>(HardwareFactory::getAbstract().display()))
     disp->ensureTouchReady();
@@ -69,6 +72,8 @@ void exit(bool reboot) {
 
   if (auto *ir = static_cast<IRTransceiver *>(hw.ir().get()))
     ir->enableRx();
+
+  ble_scene::setEditorSyncActive(false);
 
   if (auto disp = std::static_pointer_cast<Display>(HardwareFactory::getAbstract().display()))
     disp->ensureTouchReady();
