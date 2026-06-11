@@ -232,6 +232,8 @@ void loop() {
 #include "bridge_client.hpp"
 #include "device_settings.hpp"
 
+#include <Arduino.h>
+
 namespace ble_scene {
 
 namespace {
@@ -242,9 +244,10 @@ bool sSettingsPairingPending = false;
 
 void armSceneBle(bool enabled) {
   sSceneArmed = enabled;
-  if (enabled)
+  if (enabled) {
     bridge_client::sendBleControl(static_cast<uint8_t>(omote_link::BleControlAction::ArmScene));
-  else
+    requestBleStart();
+  } else
     bridge_client::sendBleControl(static_cast<uint8_t>(omote_link::BleControlAction::DisarmScene));
 }
 
@@ -287,11 +290,24 @@ void setEditorSyncActive(bool active) {
 
 bool editorSyncActive() { return sEditorSyncActive; }
 
-void onDisplayWake(uint32_t) {}
+void onDisplayWake(uint32_t) {
+  if (sSceneArmed && !sEditorSyncActive)
+    requestBleStart();
+}
 
 void loop() {
   if (sSettingsPairingPending)
     bridge_client::requestBleStatus();
+  if (sSceneArmed && !sEditorSyncActive) {
+    static uint32_t sLastEnsureMs = 0;
+    const uint32_t now = millis();
+    if (now - sLastEnsureMs > 15000) {
+      sLastEnsureMs = now;
+      const auto &st = bridge_client::bleStatus();
+      if (!st.connected)
+        requestBleStart();
+    }
+  }
 }
 
 } // namespace ble_scene

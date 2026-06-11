@@ -40,6 +40,9 @@ void requestQueuedResync();
 /** Push all local config files to the bridge (remote backup → bridge). */
 void requestPushToBridge();
 
+/** Clear ESP-NOW bridge peer (e.g. after swapping bridge hardware). */
+void forgetBridgeLink();
+
 /** Ask the bridge to poll one HA entity immediately (climate refresh). */
 void requestHaEntityPoll(const std::string &entityId);
 

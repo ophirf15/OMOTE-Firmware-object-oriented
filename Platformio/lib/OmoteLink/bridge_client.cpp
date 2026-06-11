@@ -23,6 +23,8 @@ void bridge_client_onConfigSynced(bool chainResync, const std::vector<std::strin
 
 #include <vector>
 
+#include "rapidjson/document.h"
+
 
 
 #ifndef FS_PATH
@@ -98,6 +100,18 @@ uint32_t fnv1aHash(const uint8_t *data, size_t len) {
     h *= 16777619u;
   }
   return h;
+}
+
+bool jsonPayloadValid(const std::string &relPath, const uint8_t *data, size_t len) {
+  if (!data || !len)
+    return false;
+  rapidjson::Document doc;
+  doc.Parse(reinterpret_cast<const char *>(data), len);
+  if (doc.HasParseError())
+    return false;
+  if (relPath == "DeviceSettings.schema.json")
+    return doc.IsObject() && doc.HasMember("sections") && doc["sections"].IsArray();
+  return doc.IsObject() || doc.IsArray();
 }
 
 bool verifyWrittenFile(const char *fsPath, const uint8_t *expected, size_t len) {
@@ -255,6 +269,11 @@ void startPushCurrentFile() {
     advancePushQueue();
     return;
   }
+  if (!jsonPayloadValid(rel, sPushFileBuf.data(), sPushFileBuf.size())) {
+    Serial.printf("[bridge_client] push skip %s — invalid JSON\n", rel.c_str());
+    advancePushQueue();
+    return;
+  }
   if (sPushFileBuf.size() > 65535) {
     Serial.printf("[bridge_client] push skip %s (too large)\n", rel.c_str());
     advancePushQueue();
@@ -366,6 +385,12 @@ bool writeCurrentFile() {
   if (sCurrentPath.empty() || sCurrentFileBuf.empty())
 
     return false;
+
+  if (!jsonPayloadValid(sCurrentPath, sCurrentFileBuf.data(), sCurrentFileBuf.size())) {
+    Serial.printf("[bridge_client] reject %s — invalid JSON (%u bytes)\n", sCurrentPath.c_str(),
+                  static_cast<unsigned>(sCurrentFileBuf.size()));
+    return false;
+  }
 
   std::string fsPath = FS_PATH;
 
@@ -1109,6 +1134,23 @@ void onLinked() {
 
 }
 
+void forgetBridgeLink() {
+  sPhase = SyncPhase::Idle;
+  sConfigSynced = false;
+  sPendingLinkSync = false;
+  sPendingResync = false;
+  sManifestFiles.clear();
+  sManifestAccum = "";
+  sManifestChunkTotal = 0;
+  sManifestChunkGot = 0;
+  sManifestWaitMs = 0;
+  sCurrentFileBuf.clear();
+  sPushQueue.clear();
+  sBleStatus = {};
+  omote_link::forgetPeer();
+  Serial.println("[bridge_client] bridge link cleared — searching for bridge");
+}
+
 bool syncInProgress() {
   return sPhase == SyncPhase::AwaitManifest || sPhase == SyncPhase::AwaitFile ||
          sPhase == SyncPhase::PushFile;
@@ -1232,6 +1274,8 @@ void requestConfigPull() {}
 void requestQueuedResync() {}
 
 void requestPushToBridge() {}
+
+void forgetBridgeLink() {}
 
 void requestHaEntityPoll(const std::string &) {}
 

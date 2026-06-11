@@ -19,12 +19,14 @@ private:
   void refreshStatus();
   void pullFromBridge();
   void pushToBridge();
+  void forgetBridge();
 
   Widget::Label *mTitle;
   Widget::Label *mBody;
   Widget::Label *mStatus;
   Widget::Button *mPullButton;
   Widget::Button *mPushButton;
+  Widget::Button *mForgetButton;
 };
 
 } // namespace UI::Page

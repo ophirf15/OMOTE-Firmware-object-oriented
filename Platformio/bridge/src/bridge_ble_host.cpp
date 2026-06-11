@@ -132,6 +132,8 @@ bool control(uint8_t action, const std::string &profile) {
   switch (act) {
   case omote_link::BleControlAction::ArmScene:
     setSceneArmed(true);
+    scheduleStart(false);
+    Serial.println("[bridge_ble] scene armed — BLE reconnect scheduled");
     return true;
   case omote_link::BleControlAction::DisarmScene:
     setSceneArmed(false);

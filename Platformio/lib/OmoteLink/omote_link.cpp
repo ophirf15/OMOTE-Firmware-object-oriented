@@ -807,6 +807,25 @@ bool peerMac(uint8_t out[6]) {
 
 }
 
+void forgetPeer() {
+  if (sRole != Role::Client)
+    return;
+  if (sPeerKnown && esp_now_is_peer_exist(sPeerMac))
+    esp_now_del_peer(sPeerMac);
+  memset(sPeerMac, 0, 6);
+  sPeerKnown = false;
+  sState = LinkState::Ready;
+  sLinkNotified = false;
+  memset(sStatus.bridgeMac, 0, 6);
+  nvs_handle_t h;
+  if (nvs_open("omote_link", NVS_READWRITE, &h) == ESP_OK) {
+    nvs_erase_key(h, "peer");
+    nvs_commit(h);
+    nvs_close(h);
+  }
+  Serial.println("[OLP] peer forgotten — broadcasting for bridge");
+}
+
 bool hostHasKnownClient() {
   if (sRole != Role::Host)
     return false;

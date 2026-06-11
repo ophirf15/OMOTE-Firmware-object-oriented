@@ -3,6 +3,7 @@
 
 
 #include "bridge_ble_host.hpp"
+#include "bridge_config_schema.hpp"
 #include "bridge_ha.hpp"
 
 #include "omote_link.hpp"
@@ -479,6 +480,9 @@ void startNextFileSend() {
   const FileSendJob job = sFileSendQueue.front();
   sFileSendQueue.erase(sFileSendQueue.begin());
 
+  if (job.relPath == "DeviceSettings.schema.json")
+    bridge_config_schema::ensureOnDisk();
+
   String fsPath = FS_PATH;
   fsPath += job.relPath;
 
@@ -750,10 +754,13 @@ void onMessage(omote_link::MsgType type, const uint8_t *payload, uint16_t len, c
     sActiveFileReceive.file.write(data, dataLen);
     sActiveFileReceive.offset += dataLen;
     if (sActiveFileReceive.offset >= sActiveFileReceive.total && sActiveFileReceive.total > 0) {
+      const String pushedPath = sActiveFileReceive.relPath;
       sActiveFileReceive.file.close();
-      Serial.printf("[bridge_olp] push done %s (%u bytes)\n", sActiveFileReceive.relPath.c_str(),
+      Serial.printf("[bridge_olp] push done %s (%u bytes)\n", pushedPath.c_str(),
                     static_cast<unsigned>(sActiveFileReceive.total));
       sActiveFileReceive = {};
+      if (pushedPath == "DeviceSettings.schema.json")
+        bridge_config_schema::ensureOnDisk();
       notifyConfigChanged();
     }
 

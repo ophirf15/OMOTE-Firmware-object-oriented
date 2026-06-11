@@ -17,6 +17,7 @@
 
 
 #include "bridge_config_http.hpp"
+#include "bridge_config_schema.hpp"
 
 #include "bridge_ha.hpp"
 #include "bridge_mdns.hpp"
@@ -155,6 +156,7 @@ void startServices() {
   } else {
 
     Serial.println("[bridge] LittleFS mounted");
+    bridge_config_schema::ensureOnDisk();
 
   }
 

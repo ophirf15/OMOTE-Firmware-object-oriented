@@ -232,6 +232,9 @@ bool sendToMac(const uint8_t mac[6], MsgType type, const void *payload, uint16_t
 
 bool peerMac(uint8_t out[6]);
 
+/** Client role: drop stored bridge peer so the next pong adopts a new bridge. */
+void forgetPeer();
+
 /** Host role: true if a remote has contacted this bridge recently. */
 bool hostHasKnownClient();
 

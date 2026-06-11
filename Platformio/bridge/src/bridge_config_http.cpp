@@ -1,4 +1,5 @@
 #include "bridge_config_http.hpp"
+#include "bridge_config_schema.hpp"
 
 #include "bridge_ble_host.hpp"
 #include "bridge_ha.hpp"
@@ -282,6 +283,8 @@ void handleFsWrite() {
     f.print(body);
   f.close();
   Serial.printf("[bridge_http] wrote %s (%u bytes)\n", path.c_str(), static_cast<unsigned>(body.length()));
+  if (path == "DeviceSettings.schema.json")
+    bridge_config_schema::ensureOnDisk();
   if (path == "HaSettings.json")
     bridge_ha::init();
   bridge_olp_host::notifyConfigChanged();
@@ -335,17 +338,18 @@ bool deviceSettingsSchemaLooksComplete(const String &body) {
 }
 
 void handleDeviceSettingsSchemaGet() {
+  bridge_config_schema::ensureOnDisk();
   const String full = lfsPath("DeviceSettings.schema.json");
   File f = LittleFS.open(full, "r");
   if (f) {
     const String body = f.readString();
     f.close();
-    if (body.length() && deviceSettingsSchemaLooksComplete(body)) {
+    if (body.length()) {
       sendCors();
       server.send(200, "application/json", body);
       return;
     }
-    Serial.println("[bridge_http] DeviceSettings.schema.json missing or incomplete — serving firmware default");
+    Serial.println("[bridge_http] DeviceSettings.schema.json empty — serving firmware default");
   }
   sendCors();
   server.send(200, "application/json", kDefaultDeviceSettingsSchema);

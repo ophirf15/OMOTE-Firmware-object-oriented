@@ -68,7 +68,7 @@ BleSettings::BleSettings() : Base(ID::Pages::BleSettings), mBle(HardwareFactory:
 
   mHintLabel = AddNewElement<Widget::Label>(
 #if defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT && !OMOTE_BLE
-      "BLE HID runs on the bridge at your TV. Pair from here, then use BLE scenes on the remote.");
+      "BLE HID runs on the bridge at your TV. Pair once from here; BLE scenes reconnect automatically.");
 #else
       "Pair from here or use a scene with BleEnabled. Keys send only in BLE scenes.");
 #endif

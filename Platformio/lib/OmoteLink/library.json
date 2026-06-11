@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "description": "ESP-NOW link between OMOTE remote and bridge",
   "authors": [],
-  "dependencies": {},
+  "dependencies": {
+    "RapidJsonUtility": "1.0.0"
+  },
   "build": {
     "includeDir": "."
   },
