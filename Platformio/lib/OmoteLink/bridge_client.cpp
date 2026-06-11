@@ -77,6 +77,7 @@ std::vector<std::string> sPendingSubscribe;
 
 bool sPendingResync = false;
 bool sPendingLinkSync = false;
+bool sPendingManifestCheck = false;
 BleRemoteStatus sBleStatus;
 bool sSettingsPairingPending = false;
 bool sSceneArmed = false;
@@ -623,11 +624,37 @@ void parseManifestBody(const char *data, size_t len) {
 
   purgeStaleConfigFiles();
 
-  saveSyncFingerprint();
+  const bool manifestChanged = bridgeManifestDiffersFromSaved();
+
+  std::vector<std::string> missing;
+  if (!manifestChanged) {
+    for (const auto &rel : sManifestFiles) {
+      const String full = String(FS_PATH) + rel.c_str();
+      if (!LittleFS.exists(full.c_str()))
+        missing.push_back(rel);
+    }
+  }
 
   maybePushToBridgeBeforePull();
   if (sPhase == SyncPhase::PushFile)
     return;
+
+  if (!manifestChanged && missing.empty()) {
+    saveSyncFingerprint();
+    sConfigSynced = true;
+    sPhase = SyncPhase::Idle;
+    Serial.println("[bridge_client] manifest unchanged — using local config");
+    ::bridge_client_onConfigSynced(false, sManifestFiles);
+    return;
+  }
+
+  saveSyncFingerprint();
+
+  if (!manifestChanged && !missing.empty()) {
+    sManifestFiles = std::move(missing);
+    sNextFileIdx = 0;
+    Serial.printf("[bridge_client] pulling %u missing file(s)\n", static_cast<unsigned>(sManifestFiles.size()));
+  }
 
   advanceFileQueue();
 
@@ -880,6 +907,9 @@ void init() {
 
   omote_link::setMessageHandler(onOlpMessage);
   omote_link::setRxDropFilter(dropHaRxWhenOverlay);
+  ensurePrefs();
+  if (hadSavedSyncFingerprint())
+    sConfigSynced = true;
 
 }
 
@@ -892,6 +922,12 @@ void tick() {
     return;
 
   const uint32_t now = millis();
+
+  if (sPendingManifestCheck && sPhase == SyncPhase::Idle) {
+    sPendingManifestCheck = false;
+    requestManifest();
+    Serial.println("[bridge_client] manifest check (local config retained)");
+  }
 
   if (sPendingLinkSync && sPhase == SyncPhase::Idle) {
     sPendingLinkSync = false;
@@ -1125,11 +1161,42 @@ void applyHaState(const std::string &entityId, const std::string &state) {
 
 
 
+void sendRemotePower(bool awake) {
+  if (omote_link::state() == omote_link::LinkState::Uninitialized)
+    return;
+  omote_link::RemotePowerPayload req = {};
+  req.awake = awake ? 1 : 0;
+  omote_link::sendToPeer(omote_link::MsgType::RemotePower, &req, sizeof(req));
+}
+
+void notifyRemoteSleep() {
+  if (omote_link::state() != omote_link::LinkState::Linked)
+    return;
+  sendRemotePower(false);
+  omote_link::flushOutbound(400);
+  Serial.println("[bridge_client] remote sleep signaled to bridge");
+}
+
+void notifyRemoteWake() {
+  if (omote_link::state() != omote_link::LinkState::Linked)
+    return;
+  sendRemotePower(true);
+  Serial.println("[bridge_client] remote wake signaled to bridge");
+}
+
 void onLinked() {
+
+  notifyRemoteWake();
+
+  if (hadSavedSyncFingerprint()) {
+    sConfigSynced = true;
+    sPendingManifestCheck = true;
+    Serial.println("[bridge_client] link up — manifest check only");
+    return;
+  }
 
   sConfigSynced = false;
   sPendingLinkSync = true;
-
   Serial.println("[bridge_client] link up — config pull scheduled");
 
 }
@@ -1138,6 +1205,7 @@ void forgetBridgeLink() {
   sPhase = SyncPhase::Idle;
   sConfigSynced = false;
   sPendingLinkSync = false;
+  sPendingManifestCheck = false;
   sPendingResync = false;
   sManifestFiles.clear();
   sManifestAccum = "";
@@ -1276,6 +1344,10 @@ void requestQueuedResync() {}
 void requestPushToBridge() {}
 
 void forgetBridgeLink() {}
+
+void notifyRemoteSleep() {}
+
+void notifyRemoteWake() {}
 
 void requestHaEntityPoll(const std::string &) {}
 

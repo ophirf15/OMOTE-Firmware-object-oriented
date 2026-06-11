@@ -41,6 +41,7 @@ private:
   std::function<void()> mOnRelease = nullptr;
   std::function<void()> mOnShortClick = nullptr;
   std::function<void()> mOnLongHold = nullptr;
+  uint32_t mLastClickMs = 0;
 };
 
 } // namespace UI::Widget

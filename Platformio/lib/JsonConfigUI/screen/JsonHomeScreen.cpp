@@ -117,10 +117,14 @@ JsonHomeScreen::JsonHomeScreen(DeviceFactory &aFactory)
 
 #ifndef IS_SIMULATOR
 #if OMOTE_BRIDGE_CLIENT
-  // Bridge is config authority — no local scene list or key bindings until ESP-NOW sync.
-  RtcLastState.signature = 0;
-  mStatusBar->SetTopButtonLabel("Syncing config…");
-  Serial.println("[JsonHomeScreen] bridge client — waiting for config sync");
+  if (bridge_client::configSynced()) {
+    populateSceneListFromDisk();
+    Serial.println("[JsonHomeScreen] bridge client — using local config");
+  } else {
+    RtcLastState.signature = 0;
+    mStatusBar->SetTopButtonLabel("Syncing config…");
+    Serial.println("[JsonHomeScreen] bridge client — waiting for config sync");
+  }
 #else
   populateSceneListFromDisk();
   if (RtcLastState.signature == RTC_SIG) {

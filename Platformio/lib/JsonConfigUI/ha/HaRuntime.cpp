@@ -46,6 +46,21 @@ UI::Page::JsonPage *gActivePage = nullptr;
 
 
 
+std::string gLastToggleEntity;
+uint32_t gLastToggleCallMs = 0;
+static constexpr uint32_t kToggleDebounceMs = 450;
+
+bool shouldDebounceToggle(const std::string &service, const std::string &entityId) {
+  if (service != "toggle" || entityId.empty())
+    return false;
+  const uint32_t now = millis();
+  if (entityId == gLastToggleEntity && now - gLastToggleCallMs < kToggleDebounceMs)
+    return true;
+  gLastToggleEntity = entityId;
+  gLastToggleCallMs = now;
+  return false;
+}
+
 struct StateEntry {
 
   std::string entityId;
@@ -362,6 +377,11 @@ bool callService(const std::string &domain, const std::string &service, const st
     dom = dot != std::string::npos ? entityId.substr(0, dot) : "homeassistant";
   }
   std::string svc = service.empty() ? "toggle" : service;
+
+  if (shouldDebounceToggle(svc, entityId)) {
+    Serial.printf("HA> tap debounced %s.%s %s\n", dom.c_str(), svc.c_str(), entityId.c_str());
+    return true;
+  }
 
   Serial.printf("HA> tap %s.%s %s\n", dom.c_str(), svc.c_str(), entityId.c_str());
 #if OMOTE_BRIDGE_CLIENT

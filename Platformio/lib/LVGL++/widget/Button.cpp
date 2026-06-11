@@ -3,6 +3,8 @@
 #include "Colors.hpp"
 #include "LvglResourceManager.hpp"
 
+#include <Arduino.h>
+
 using namespace UI::Widget;
 
 Button::Button() : Base(lv_btn_create(UI::Screen::BackgroundScreen::getLvInstance()),
@@ -28,8 +30,11 @@ void Button::OnLvglEvent(lv_event_t *anEvent) {
     mOnPress();
   } else if (eventCode == LV_EVENT_RELEASED && mOnRelease) {
     mOnRelease();
-  } else if ((eventCode == LV_EVENT_CLICKED || eventCode == LV_EVENT_SHORT_CLICKED) &&
-             mOnShortClick) {
+  } else if (eventCode == LV_EVENT_CLICKED && mOnShortClick) {
+    const uint32_t now = millis();
+    if (now - mLastClickMs < 350)
+      return;
+    mLastClickMs = now;
     mOnShortClick();
   } else if (eventCode == LV_EVENT_LONG_PRESSED && mOnLongHold) {
     mOnLongHold();

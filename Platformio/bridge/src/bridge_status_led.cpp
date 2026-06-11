@@ -4,6 +4,7 @@
 
 #include "bridge_ble_host.hpp"
 #include "bridge_olp_host.hpp"
+#include "bridge_power.hpp"
 #include "captive_portal.hpp"
 
 #include <Arduino.h>
@@ -53,6 +54,11 @@ void tick() {
   if (bridge_portal::isActive()) {
     const uint8_t p = breathe(1800, now, 255);
     setRgb(p, p / 4, 0);
+    return;
+  }
+
+  if (!bridge_power::remoteAwake()) {
+    setRgb(0, 0, dim(12));
     return;
   }
 

@@ -5,6 +5,7 @@
 #include "bridge_ble_host.hpp"
 #include "bridge_config_schema.hpp"
 #include "bridge_ha.hpp"
+#include "bridge_power.hpp"
 
 #include "omote_link.hpp"
 
@@ -596,6 +597,16 @@ void onMessage(omote_link::MsgType type, const uint8_t *payload, uint16_t len, c
 
   switch (type) {
 
+  case omote_link::MsgType::RemotePower:
+
+    if (len >= sizeof(omote_link::RemotePowerPayload)) {
+      omote_link::RemotePowerPayload req;
+      memcpy(&req, payload, sizeof(req));
+      bridge_power::setRemoteAwake(req.awake != 0);
+    }
+
+    break;
+
   case omote_link::MsgType::ConfigManifestReq:
 
     Serial.println("[bridge_olp] manifest req from remote");
@@ -772,6 +783,9 @@ void onMessage(omote_link::MsgType type, const uint8_t *payload, uint16_t len, c
     break;
 
   }
+
+  if (type != omote_link::MsgType::RemotePower)
+    bridge_power::noteRemoteActivity();
 
 }
 

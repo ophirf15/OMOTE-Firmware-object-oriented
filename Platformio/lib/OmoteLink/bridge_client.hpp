@@ -43,6 +43,12 @@ void requestPushToBridge();
 /** Clear ESP-NOW bridge peer (e.g. after swapping bridge hardware). */
 void forgetBridgeLink();
 
+/** Tell bridge the remote is entering deep/light sleep (best-effort before power down). */
+void notifyRemoteSleep();
+
+/** Tell bridge the remote is active again (after wake or link-up). */
+void notifyRemoteWake();
+
 /** Ask the bridge to poll one HA entity immediately (climate refresh). */
 void requestHaEntityPoll(const std::string &entityId);
 

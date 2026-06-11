@@ -150,10 +150,18 @@ bool isHighPriorityTx(uint8_t type) {
   case MsgType::BleStatus:
   case MsgType::HaState:
   case MsgType::HaStateAttrs:
+  case MsgType::RemotePower:
     return true;
   default:
     return false;
   }
+}
+
+bool txQueueEmpty() {
+  portENTER_CRITICAL(&sTxMux);
+  const bool empty = sHighTxQueue.empty() && sNormTxQueue.empty() && !sTxInFlight;
+  portEXIT_CRITICAL(&sTxMux);
+  return empty;
 }
 
 /** Must not drop when the TX queue is full — large file sync depends on every chunk. */
@@ -840,7 +848,15 @@ bool hostHasKnownClient() {
 
 __attribute__((weak)) void onLinkEstablished() {}
 
-
+void flushOutbound(uint32_t maxMs) {
+  const uint32_t start = millis();
+  while (millis() - start < maxMs) {
+    pumpTxQueue();
+    if (txQueueEmpty())
+      break;
+    delay(5);
+  }
+}
 
 } // namespace omote_link
 

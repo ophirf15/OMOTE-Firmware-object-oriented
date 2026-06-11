@@ -69,6 +69,9 @@ enum class MsgType : uint8_t {
   /** Remote → bridge: poll one HA entity immediately. */
   HaPollReq = 35,
 
+  /** Remote → bridge: awake=1 wake, awake=0 sleep (reduce HA polling / save power). */
+  RemotePower = 36,
+
 };
 
 
@@ -186,6 +189,10 @@ struct __attribute__((packed)) HaPollReqPayload {
   char entityId[kMaxHaEntityIdLen];
 };
 
+struct __attribute__((packed)) RemotePowerPayload {
+  uint8_t awake;
+};
+
 
 
 /** Last pong / status from bridge (valid when linked). */
@@ -239,6 +246,9 @@ void forgetPeer();
 bool hostHasKnownClient();
 
 void onLinkEstablished();
+
+/** Client role: drain outbound ESP-NOW packets (e.g. before deep sleep). */
+void flushOutbound(uint32_t maxMs = 400);
 
 
 

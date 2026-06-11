@@ -1,6 +1,7 @@
 #include "bridge_ha.hpp"
 
 #include "bridge_mdns.hpp"
+#include "bridge_power.hpp"
 
 #include <Arduino.h>
 #include <HTTPClient.h>
@@ -269,7 +270,7 @@ void init() {
 }
 
 void tick() {
-  if (!configured() || sEntities.empty() || !wifiReady())
+  if (!bridge_power::allowHaPolling() || !configured() || sEntities.empty() || !wifiReady())
     return;
   const uint32_t now = millis();
   if (now - sLastPollMs < kPollMs)

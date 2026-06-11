@@ -25,6 +25,7 @@
 #include "bridge_olp_host.hpp"
 #include "bridge_ble_host.hpp"
 #include "bridge_status_led.hpp"
+#include "bridge_power.hpp"
 
 #include "captive_portal.hpp"
 
@@ -209,6 +210,7 @@ void setup() {
   logBoot();
 
   bridge_status_led::init();
+  bridge_power::init();
 
   if (!hasStoredCredentials()) {
 
@@ -258,9 +260,11 @@ void loop() {
 
   bridge_ble_host::tick();
 
+  bridge_power::tick();
+
   bridge_status_led::tick();
 
-  delay(2);
+  delay(bridge_power::remoteAwake() ? 2 : 10);
 
 }
 

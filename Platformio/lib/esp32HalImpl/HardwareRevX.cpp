@@ -299,6 +299,9 @@ void HardwareRevX::saveSettings() {
 }
 
 void HardwareRevX::enterSleep(SleepMode mode, uint32_t duration) {
+#if OMOTE_BRIDGE_CLIENT
+  bridge_client::notifyRemoteSleep();
+#endif
   /*
   Light sleep implementation is a bit crude, rather than making use of all the features
   of light sleep to allow automatic pin changes, allow minimal disruption to initialised
@@ -447,6 +450,10 @@ void HardwareRevX::lightSleepWakeReint(SleepMode mode) {
   }
 
   mWifiHandler->begin();
+#if OMOTE_BRIDGE_CLIENT
+  if (omote_link::state() == omote_link::LinkState::Linked)
+    bridge_client::notifyRemoteWake();
+#endif
   mWifiHandler->mqttForceReconnect();
 
   initIO();
