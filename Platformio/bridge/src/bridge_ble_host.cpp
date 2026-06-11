@@ -85,9 +85,13 @@ void reloadProfileFromDisk() {
 
 void tick() {
   if (sPendingStart && millis() >= sPendingStartMs) {
-    sPendingStart = false;
-    if (ensureBle())
-      Serial.println("[bridge_ble] stack running");
+    if (ensureBle()) {
+      sPendingStart = false;
+      Serial.println(sPairingPending ? "[bridge_ble] stack running (pairing)"
+                                     : "[bridge_ble] stack running");
+    } else {
+      sPendingStartMs = millis() + kStartDelayMs;
+    }
   }
   if (sBle && sBle->isInitialized())
     sBle->taskLoop();
@@ -134,7 +138,7 @@ bool control(uint8_t action, const std::string &profile) {
     return true;
   case omote_link::BleControlAction::EnsureRunning:
     scheduleStart(false);
-    return ensureBle();
+    return true;
   case omote_link::BleControlAction::StartPairing:
     if (!profile.empty()) {
       sProfile = profile;
@@ -142,20 +146,25 @@ bool control(uint8_t action, const std::string &profile) {
         sBle->setProfile(sProfile);
     }
     scheduleStart(true);
-    return ensureBle();
+    Serial.println("[bridge_ble] pairing scheduled (async init)");
+    return true;
   case omote_link::BleControlAction::StopPairing:
     sPairingPending = false;
     if (sBle)
       sBle->stopPairingMode();
     return true;
   case omote_link::BleControlAction::Disconnect:
-    if (!ensureBle())
-      return false;
+    if (!sBle || !sBle->isInitialized()) {
+      scheduleStart(sPairingPending);
+      return true;
+    }
     sBle->disconnectClients();
     return true;
   case omote_link::BleControlAction::ForgetBonds:
-    if (!ensureBle())
-      return false;
+    if (!sBle || !sBle->isInitialized()) {
+      scheduleStart(true);
+      return true;
+    }
     sBle->forgetBonds();
     return true;
   case omote_link::BleControlAction::SetProfile:

@@ -8,9 +8,11 @@
 #include "LearnBattery.hpp"
 #include "List.hpp"
 #include "LoggingSettings.hpp"
+#include "LvglResourceManager.hpp"
 #include "PopUpScreen.hpp"
 #include "ScreenManager.hpp"
 #include "Slider.hpp"
+#include "UiOverlayGate.hpp"
 #if OMOTE_BLE || (defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT)
 #include "BleSettings.hpp"
 #endif
@@ -19,6 +21,9 @@
 #include "device_settings_schema.hpp"
 
 #include <lvgl.h>
+
+#include <memory>
+#include <vector>
 
 using namespace UI::Page;
 using namespace UI::Color;
@@ -77,11 +82,54 @@ const char *menuIconForSection(const rapidjson::Value &section) {
   return LV_SYMBOL_SETTINGS;
 }
 
+struct PendingSettings {
+  std::unique_ptr<SettingsPage> page;
+  std::vector<SettingsPage::InjectedItem> extra;
+  std::vector<SettingsPage::InjectedItem> debug;
+  bool withDebug = false;
+};
+
 } // namespace
 
 SettingsPage::SettingsPage()
-    : Base(ID::Pages::Settings), mSettingsList(AddNewElement<Widget::List>()) {
+    : Base(ID::Pages::Settings), mSettingsList(AddNewElement<Widget::List>()) {}
 
+void SettingsPage::openAsync(std::vector<InjectedItem> extraItems, std::vector<InjectedItem> debugItems,
+                             bool withDebug) {
+  UiOverlayGate::prepareRam();
+  UiOverlayGate::setActive(true);
+
+  auto pending = std::make_shared<PendingSettings>();
+  pending->extra = std::move(extraItems);
+  pending->debug = std::move(debugItems);
+  pending->withDebug = withDebug;
+
+  auto &q = LvglResourceManager::GetInstance();
+  q.QueueForLater([pending]() {
+    pending->page = std::make_unique<SettingsPage>();
+    pending->page->buildCoreItems();
+  });
+  q.QueueForLater([pending]() {
+    if (pending->page)
+      pending->page->buildSchemaMenuItems();
+  });
+  q.QueueForLater([pending]() {
+    if (!pending->page)
+      return;
+    pending->page->buildStandardTailItems();
+    for (const auto &item : pending->extra) {
+      pending->page->AddSettingItem(std::get<0>(item), std::get<1>(item), std::get<2>(item));
+    }
+    if (pending->withDebug) {
+      for (const auto &item : pending->debug) {
+        pending->page->AddSettingItem(std::get<0>(item), std::get<1>(item), std::get<2>(item));
+      }
+    }
+    UI::Screen::Manager::getInstance().pushPopUp(std::move(pending->page), LV_SCR_LOAD_ANIM_NONE);
+  });
+}
+
+void SettingsPage::buildCoreItems() {
   mSettingsList->AddItem("Backlight", LV_SYMBOL_SETTINGS, [this] { PushDisplaySettings(); }, SettingItemHeight);
   mSettingsList->AddItem("Device", LV_SYMBOL_SETTINGS, [this] { PushSystemSettings(); }, mHeight);
 
@@ -90,37 +138,42 @@ SettingsPage::SettingsPage()
     UI::Screen::Manager::getInstance().pushPopUp(std::make_unique<BleSettings>());
   }, SettingItemHeight);
 #endif
+}
 
+void SettingsPage::buildSchemaMenuItems() {
   if (!device_settings_schema::isLoaded())
     device_settings_schema::loadFromLittleFS();
   const auto &schema = device_settings_schema::document();
-  if (schema.IsObject() && schema.HasMember("sections") && schema["sections"].IsArray()) {
-    const auto &sections = schema["sections"];
-    for (rapidjson::SizeType i = 0; i < sections.Size(); ++i) {
-      const auto &section = sections[i];
-      if (!section.IsObject() || !section.HasMember("id") || !section["id"].IsString())
-        continue;
-      const std::string sectionId = section["id"].GetString();
-      if (sectionId == "bluetooth")
-        continue;
-      const char *placement =
-          section.HasMember("placement") && section["placement"].IsString()
-              ? section["placement"].GetString()
-              : "submenu";
-      if (strcmp(placement, "menu") != 0)
-        continue;
-      const std::string sectionTitle =
-          (section.HasMember("menu_title") && section["menu_title"].IsString())
-              ? section["menu_title"].GetString()
-              : (section.HasMember("title") && section["title"].IsString() ? section["title"].GetString()
-                                                                             : sectionId);
-      mSettingsList->AddItem(sectionTitle, menuIconForSection(section), [sectionId, sectionTitle] {
-        UI::Screen::Manager::getInstance().pushPopUp(
-            std::make_unique<SystemSettings>(sectionId, sectionTitle));
-      }, SettingItemHeight);
-    }
-  }
+  if (!schema.IsObject() || !schema.HasMember("sections") || !schema["sections"].IsArray())
+    return;
 
+  const auto &sections = schema["sections"];
+  for (rapidjson::SizeType i = 0; i < sections.Size(); ++i) {
+    const auto &section = sections[i];
+    if (!section.IsObject() || !section.HasMember("id") || !section["id"].IsString())
+      continue;
+    const std::string sectionId = section["id"].GetString();
+    if (sectionId == "bluetooth")
+      continue;
+    const char *placement =
+        section.HasMember("placement") && section["placement"].IsString()
+            ? section["placement"].GetString()
+            : "submenu";
+    if (strcmp(placement, "menu") != 0)
+      continue;
+    const std::string sectionTitle =
+        (section.HasMember("menu_title") && section["menu_title"].IsString())
+            ? section["menu_title"].GetString()
+            : (section.HasMember("title") && section["title"].IsString() ? section["title"].GetString()
+                                                                           : sectionId);
+    mSettingsList->AddItem(sectionTitle, menuIconForSection(section), [sectionId, sectionTitle] {
+      UI::Screen::Manager::getInstance().pushPopUp(
+          std::make_unique<SystemSettings>(sectionId, sectionTitle));
+    }, SettingItemHeight);
+  }
+}
+
+void SettingsPage::buildStandardTailItems() {
   mSettingsList->AddItem("Wifi", LV_SYMBOL_WIFI, [this] { PushWifiSettings(); }, SettingItemHeight);
   mSettingsList->AddItem("Logging", LV_SYMBOL_LIST, [this] { PushLoggingSettings(); }, SettingItemHeight);
   mSettingsList->AddItem("Battery", LV_SYMBOL_BATTERY_3, [this] { PushLearnBattery(); }, mHeight);
@@ -132,7 +185,8 @@ void SettingsPage::AddSettingItem(std::string aTitle, const char *aSymbol,
   mSettingsList->AddItem(aTitle, aSymbol, [aPageGetter] {
     if (auto page = aPageGetter(); page) {
       UI::Screen::Manager::getInstance().pushPopUp(std::move(page));
-    } }, SettingItemHeight);
+    }
+  }, SettingItemHeight);
 }
 
 void SettingsPage::PushDisplaySettings() {

@@ -14,6 +14,13 @@ public:
 
   SettingsPage();
 
+  static void openAsync(std::vector<InjectedItem> extraItems, std::vector<InjectedItem> debugItems,
+                        bool withDebug);
+
+  void buildCoreItems();
+  void buildSchemaMenuItems();
+  void buildStandardTailItems();
+
   /**
    * Add item to settings aPageGetter should return a page
    * to launch when pressed in settings

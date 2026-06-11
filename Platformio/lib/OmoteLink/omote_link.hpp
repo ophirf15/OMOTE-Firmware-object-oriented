@@ -206,7 +206,7 @@ struct BridgeStatus {
 
 using MessageHandler = void (*)(MsgType type, const uint8_t *payload, uint16_t len, const uint8_t srcMac[6]);
 
-
+using RxDropFilter = bool (*)(MsgType type);
 
 void init(Role role);
 
@@ -223,6 +223,8 @@ uint32_t pongsReceived();
 
 
 void setMessageHandler(MessageHandler handler);
+
+void setRxDropFilter(RxDropFilter filter);
 
 bool sendToPeer(MsgType type, const void *payload, uint16_t len);
 

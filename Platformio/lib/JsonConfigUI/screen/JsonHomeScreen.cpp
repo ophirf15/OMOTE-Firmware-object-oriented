@@ -31,10 +31,20 @@ using namespace UI::Screen;
 
 #if OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
 #include "bridge_client.hpp"
-namespace {
-JsonHomeScreen *sHomeForBridge = nullptr;
-} // namespace
 #endif
+
+namespace {
+JsonHomeScreen *sOverlayHome = nullptr;
+
+void prepareHomeOverlayRam() {
+  if (sOverlayHome)
+    sOverlayHome->prepareForOverlay();
+}
+
+#if OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
+JsonHomeScreen *sHomeForBridge = nullptr;
+#endif
+} // namespace
 
 #define RTC_SIG 0x128934ab56cd78ef
 #define RTC_STR_SIZE 100
@@ -73,9 +83,11 @@ JsonHomeScreen::JsonHomeScreen(DeviceFactory &aFactory)
   // Init Factory to allow building of Json devices
   aFactory.InitJsonFactory();
   HaRuntime::init();
+  sOverlayHome = this;
 #if OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
   sHomeForBridge = this;
 #endif
+  UiOverlayGate::setPrepareHandler(prepareHomeOverlayRam);
   std::fprintf(stderr, "[JsonHomeScreen] HaRuntime init done\n");
   std::fflush(stderr);
 

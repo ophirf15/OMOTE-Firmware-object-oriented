@@ -214,12 +214,13 @@ void BleSettings::refreshStatus() {
     return;
 #if defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT && !OMOTE_BLE
   bridge_client::requestBleStatus();
-  if (!bridgeBleLinked()) {
-    mStatusLabel->SetText("BLE: bridge not linked");
+  if (ble_scene::settingsPairingPending()) {
+    mStatusLabel->SetText(bridgeBleLinked() ? "BLE: starting… look for Omote Remote on TV"
+                                            : "BLE: waking bridge for pairing…");
     return;
   }
-  if (ble_scene::settingsPairingPending()) {
-    mStatusLabel->SetText("BLE: starting… look for Omote Remote on TV");
+  if (!bridgeBleLinked()) {
+    mStatusLabel->SetText("BLE: bridge not linked");
     return;
   }
   const auto &st = bridge_client::bleStatus();

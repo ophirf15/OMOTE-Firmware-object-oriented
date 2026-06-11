@@ -256,6 +256,10 @@ void refreshSettings() {
 }
 
 void pushSubscription() {
+  static std::vector<std::string> sLastPushed;
+  if (gActiveEntities == sLastPushed)
+    return;
+  sLastPushed = gActiveEntities;
 #if OMOTE_BRIDGE_CLIENT
   bridge_client::subscribeEntities(gActiveEntities);
 #else

@@ -35,7 +35,7 @@ constexpr uint8_t kVersion = 1;
 
 constexpr uint32_t kClientPingMs = 2000;
 
-constexpr uint32_t kLinkTimeoutMs = 8000;
+constexpr uint32_t kLinkTimeoutMs = 15000;
 
 
 
@@ -102,6 +102,7 @@ uint8_t sPeerMac[6] = {};
 bool sPeerKnown = false;
 
 MessageHandler sHandler = nullptr;
+RxDropFilter sRxDropFilter = nullptr;
 
 bool sLinkNotified = false;
 
@@ -141,8 +142,11 @@ static constexpr uint32_t kPingDeferAfterBleKeyMs = 400;
 
 bool isHighPriorityTx(uint8_t type) {
   switch (static_cast<MsgType>(type)) {
-  case MsgType::BleSendKey:
+  case MsgType::Ping:
   case MsgType::Pong:
+  case MsgType::BleSendKey:
+  case MsgType::BleControl:
+  case MsgType::BleStatusReq:
   case MsgType::BleStatus:
   case MsgType::HaState:
   case MsgType::HaStateAttrs:
@@ -302,11 +306,14 @@ void drainMessageQueue() {
   if (!sMsgQueue)
     return;
   QueuedMsg msg;
-  while (xQueueReceive(sMsgQueue, &msg, 0) == pdTRUE)
+  static constexpr int kMaxPerTick = 8;
+  for (int i = 0; i < kMaxPerTick && xQueueReceive(sMsgQueue, &msg, 0) == pdTRUE; ++i)
     dispatchMessage(msg.type, msg.payload, msg.len, msg.srcMac);
 }
 
 bool enqueueMessage(uint8_t type, const uint8_t *payload, uint16_t len, const uint8_t srcMac[6]) {
+  if (sRxDropFilter && sRxDropFilter(static_cast<MsgType>(type)))
+    return true;
   ensureMsgQueue();
   if (!sMsgQueue)
     return false;
@@ -535,6 +542,12 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
 
 
 
+  if (sRole == Role::Client && sPeerKnown && memcmp(info->src_addr, sPeerMac, 6) == 0) {
+    sStatus.lastRxMs = millis();
+    if (sState == LinkState::Ready)
+      sState = LinkState::Linked;
+  }
+
   if (sRole == Role::Host) {
     memcpy(sLastClientMac, info->src_addr, 6);
     addPeer(info->src_addr, false);
@@ -735,6 +748,8 @@ uint32_t pongsReceived() { return sPongsReceived; }
 
 
 void setMessageHandler(MessageHandler handler) { sHandler = handler; }
+
+void setRxDropFilter(RxDropFilter filter) { sRxDropFilter = filter; }
 
 
 

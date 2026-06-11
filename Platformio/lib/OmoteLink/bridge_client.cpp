@@ -150,12 +150,18 @@ void ensurePrefs() {
   }
 }
 
+std::string manifestFingerprint(const std::vector<std::string> &files) {
+  std::vector<std::string> sorted = files;
+  std::sort(sorted.begin(), sorted.end());
+  std::string fp;
+  for (const auto &m : sorted)
+    fp += m + "\n";
+  return fp;
+}
+
 void saveSyncFingerprint() {
   ensurePrefs();
-  String fp;
-  for (const auto &m : sManifestFiles)
-    fp += String(m.c_str()) + "\n";
-  sPrefs.putString("mfm", fp);
+  sPrefs.putString("mfm", manifestFingerprint(sManifestFiles).c_str());
 }
 
 bool hadSavedSyncFingerprint() {
@@ -168,10 +174,7 @@ bool bridgeManifestDiffersFromSaved() {
   const String saved = sPrefs.getString("mfm", "");
   if (!saved.length())
     return false;
-  String now;
-  for (const auto &m : sManifestFiles)
-    now += String(m.c_str()) + "\n";
-  return saved != now;
+  return saved.c_str() != manifestFingerprint(sManifestFiles);
 }
 
 void collectAllLocalConfigPaths(std::vector<std::string> &out) {
@@ -299,22 +302,19 @@ void maybePushToBridgeBeforePull() {
     return;
 
   std::vector<std::string> toPush;
-  if (hadSavedSyncFingerprint() && bridgeManifestDiffersFromSaved()) {
-    Serial.println("[bridge_client] bridge manifest changed — restoring local backup");
-    toPush = local;
-  } else {
-    for (const auto &rel : local) {
-      bool onBridge = false;
-      for (const auto &m : sManifestFiles) {
-        if (m == rel) {
-          onBridge = true;
-          break;
-        }
+  for (const auto &rel : local) {
+    bool onBridge = false;
+    for (const auto &m : sManifestFiles) {
+      if (m == rel) {
+        onBridge = true;
+        break;
       }
-      if (!onBridge)
-        toPush.push_back(rel);
     }
+    if (!onBridge)
+      toPush.push_back(rel);
   }
+  if (!toPush.empty() && bridgeManifestDiffersFromSaved())
+    Serial.println("[bridge_client] bridge manifest changed — pushing missing files only");
 
   if (!toPush.empty())
     beginPushToBridge(toPush, true);
@@ -598,6 +598,8 @@ void parseManifestBody(const char *data, size_t len) {
 
   purgeStaleConfigFiles();
 
+  saveSyncFingerprint();
+
   maybePushToBridgeBeforePull();
   if (sPhase == SyncPhase::PushFile)
     return;
@@ -753,6 +755,9 @@ void onOlpMessage(omote_link::MsgType type, const uint8_t *payload, uint16_t len
 
   case omote_link::MsgType::HaState: {
 
+    if (HaRuntime::overlayActive())
+      break;
+
     if (len < sizeof(omote_link::HaStatePayload))
 
       break;
@@ -769,6 +774,9 @@ void onOlpMessage(omote_link::MsgType type, const uint8_t *payload, uint16_t len
   }
 
   case omote_link::MsgType::HaStateAttrs: {
+
+    if (HaRuntime::overlayActive())
+      break;
 
     if (len < offsetof(omote_link::HaStateAttrsPayload, data))
       break;
@@ -838,9 +846,15 @@ void onOlpMessage(omote_link::MsgType type, const uint8_t *payload, uint16_t len
 
 
 
+bool dropHaRxWhenOverlay(omote_link::MsgType type) {
+  return HaRuntime::overlayActive() &&
+         (type == omote_link::MsgType::HaState || type == omote_link::MsgType::HaStateAttrs);
+}
+
 void init() {
 
   omote_link::setMessageHandler(onOlpMessage);
+  omote_link::setRxDropFilter(dropHaRxWhenOverlay);
 
 }
 
@@ -984,6 +998,11 @@ void subscribeEntities(const std::vector<std::string> &entityIds) {
     return;
 
   }
+
+  static std::vector<std::string> sLastSubscribed;
+  if (entityIds == sLastSubscribed)
+    return;
+  sLastSubscribed = entityIds;
 
   constexpr size_t kChunkMax = sizeof(omote_link::HaSubscribePayload::entities);
 
@@ -1151,7 +1170,7 @@ bool sendBleKey(const std::string &keyName) {
 }
 
 bool sendBleControl(uint8_t action, const std::string &profile) {
-  if (!linked())
+  if (omote_link::state() == omote_link::LinkState::Uninitialized)
     return false;
   omote_link::BleControlPayload req = {};
   req.action = action;
@@ -1161,7 +1180,12 @@ bool sendBleControl(uint8_t action, const std::string &profile) {
 }
 
 void requestBleStatus() {
-  if (!linked())
+  static uint32_t sLastReqMs = 0;
+  const uint32_t now = millis();
+  if (now - sLastReqMs < 750)
+    return;
+  sLastReqMs = now;
+  if (omote_link::state() == omote_link::LinkState::Uninitialized)
     return;
   omote_link::sendToPeer(omote_link::MsgType::BleStatusReq, nullptr, 0);
 }

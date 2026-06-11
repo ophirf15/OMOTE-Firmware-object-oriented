@@ -173,17 +173,7 @@ void StatusBar::SetTopButtonLabel(std::string aLabel) {
 }
 
 void StatusBar::PushSettingsList(const bool aWithDebug) {
-  UiOverlayGate::setActive(true);
-  auto settings = std::make_unique<Page::SettingsPage>();
-  for (auto &item : mExtraSettingsItems) {
-    settings->AddSettingItem(std::get<0>(item), std::get<1>(item), std::get<2>(item));
-  }
-  if (aWithDebug) {
-    for (auto &item : mDebugSettingsItems) {
-      settings->AddSettingItem(std::get<0>(item), std::get<1>(item), std::get<2>(item));
-    }
-  }
-  UI::Screen::Manager::getInstance().pushPopUp(std::move(settings), LV_SCR_LOAD_ANIM_NONE);
+  Page::SettingsPage::openAsync(mExtraSettingsItems, mDebugSettingsItems, aWithDebug);
 }
 
 void StatusBar::PushActiveDeviceList() {

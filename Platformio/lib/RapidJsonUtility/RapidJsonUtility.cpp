@@ -1,6 +1,5 @@
 #include "RapidJsonUtilty.hpp"
 
-#include "rapidjson/allocators.h"
 #include "rapidjson/document.h"
 #include "rapidjson/istreamwrapper.h"
 #include "rapidjson/prettywriter.h"
@@ -23,9 +22,6 @@ constexpr auto kParseFileFlags =
     rapidjson::ParseFlag::kParseCommentsFlag | rapidjson::ParseFlag::kParseIterativeFlag;
 
 #if defined(ARDUINO) && !defined(IS_SIMULATOR)
-
-char sJsonParsePool[32768];
-rapidjson::MemoryPoolAllocator<> sJsonParseAlloc(sJsonParsePool, sizeof(sJsonParsePool));
 
 uint32_t fnv1aHash(const uint8_t *data, size_t len) {
   uint32_t h = 2166136261u;
@@ -66,13 +62,11 @@ bool readLittleFsJson(const std::filesystem::path &aPathToJson, rapidjson::Docum
     text += 3;
     len -= 3;
   }
-  sJsonParseAlloc.Clear();
-  rapidjson::Document tmp(&sJsonParseAlloc);
-  tmp.Parse<kParseFileFlags>(text, len);
-  if (tmp.HasParseError()) {
-    const size_t errOff = tmp.GetErrorOffset();
+  doc.Parse<kParseFileFlags>(text, len);
+  if (doc.HasParseError()) {
+    const size_t errOff = doc.GetErrorOffset();
     Serial.printf("[JSON] parse fail %s err=%u@%u hash=%08x heap=%u\n", path.c_str(),
-                  static_cast<unsigned>(tmp.GetParseError()), static_cast<unsigned>(errOff),
+                  static_cast<unsigned>(doc.GetParseError()), static_cast<unsigned>(errOff),
                   fnv1aHash(reinterpret_cast<const uint8_t *>(text), len),
                   static_cast<unsigned>(ESP.getFreeHeap()));
     if (errOff < len) {
@@ -86,9 +80,6 @@ bool readLittleFsJson(const std::filesystem::path &aPathToJson, rapidjson::Docum
     doc.SetNull();
     return false;
   }
-  doc.SetObject();
-  doc.RemoveAllMembers();
-  doc.CopyFrom(tmp, doc.GetAllocator());
   return true;
 }
 #endif
