@@ -843,6 +843,16 @@ bool isRemoteLinked() {
   return omote_link::hostHasKnownClient();
 }
 
+bool isConfigTransferActive() {
+  if (sActiveFileSend.active)
+    return true;
+  if (!sFileSendQueue.empty())
+    return true;
+  if (sActiveFileReceive.active)
+    return true;
+  return false;
+}
+
 void notifyConfigChanged() {
   sConfigNotifyPending = true;
   sConfigNotifyAtMs = millis() + kConfigNotifyDebounceMs;

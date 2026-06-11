@@ -24,6 +24,7 @@
 
 #include "bridge_olp_host.hpp"
 #include "bridge_ble_host.hpp"
+#include "bridge_status_led.hpp"
 
 #include "captive_portal.hpp"
 
@@ -207,7 +208,7 @@ void setup() {
 
   logBoot();
 
-
+  bridge_status_led::init();
 
   if (!hasStoredCredentials()) {
 
@@ -219,8 +220,6 @@ void setup() {
 
   }
 
-
-
   if (!connectWifi()) {
 
     bridge_portal::start();
@@ -228,8 +227,6 @@ void setup() {
     return;
 
   }
-
-
 
   startServices();
 
@@ -242,6 +239,8 @@ void loop() {
   if (bridge_portal::isActive()) {
 
     bridge_portal::loop();
+
+    bridge_status_led::tick();
 
     delay(2);
 
@@ -258,6 +257,8 @@ void loop() {
   bridge_olp_host::tick();
 
   bridge_ble_host::tick();
+
+  bridge_status_led::tick();
 
   delay(2);
 

@@ -1,6 +1,7 @@
 #include "bridge_ble_host.hpp"
 
 #include "ble_handler.hpp"
+#include "bridge_status_led.hpp"
 #include "omote_link.hpp"
 
 #include <Arduino.h>
@@ -111,6 +112,18 @@ void setSceneArmed(bool armed) {
 
 bool sceneArmed() { return sSceneArmed; }
 
+bool isConnected() {
+  return sBle && sBle->isInitialized() && sBle->isConnected();
+}
+
+bool isPairingMode() {
+  return sPairingPending || (sBle && sBle->isInitialized() && sBle->isPairingMode());
+}
+
+bool isAdvertising() {
+  return sBle && sBle->isInitialized() && sBle->isAdvertising();
+}
+
 bool sendKey(const std::string &keyName) {
   if (keyName.empty())
     return false;
@@ -123,6 +136,7 @@ bool sendKey(const std::string &keyName) {
     return false;
   }
   sBle->sendKey(keyName);
+  bridge_status_led::onBleKey();
   Serial.printf("[bridge_ble] key %s\n", keyName.c_str());
   return true;
 }

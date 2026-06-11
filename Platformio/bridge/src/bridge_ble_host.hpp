@@ -14,6 +14,9 @@ bool sendKey(const std::string &keyName);
 bool control(uint8_t action, const std::string &profile = {});
 void setSceneArmed(bool armed);
 bool sceneArmed();
+bool isConnected();
+bool isPairingMode();
+bool isAdvertising();
 
 std::string statusJson();
 std::string identityListJson();
