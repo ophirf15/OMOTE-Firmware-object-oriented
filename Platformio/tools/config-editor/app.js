@@ -21,44 +21,102 @@ const DEFAULT_DEVICE_SETTINGS = OmoteSettingsForm.defaultsFromSchema(DEFAULT_DEV
 let canonicalDeviceSettingsSchema = null;
 
 async function loadCanonicalDeviceSettingsSchema() {
-  if (canonicalDeviceSettingsSchema) return canonicalDeviceSettingsSchema;
+  if (canonicalDeviceSettingsSchema?.sections?.length) return canonicalDeviceSettingsSchema;
   try {
     const r = await fetch('canonical-device-settings.schema.json', { cache: 'no-cache' });
-    if (r.ok) canonicalDeviceSettingsSchema = await r.json();
+    if (r.ok) {
+      const fetched = await r.json();
+      if (fetched?.sections?.length) canonicalDeviceSettingsSchema = fetched;
+    }
   } catch (_) { /* offline or file:// */ }
-  if (!canonicalDeviceSettingsSchema) {
+  if (!canonicalDeviceSettingsSchema?.sections?.length) {
+    const bundled = OmoteSettingsForm.CANONICAL_DEVICE_SETTINGS_SCHEMA;
+    if (bundled?.sections?.length) {
+      canonicalDeviceSettingsSchema = JSON.parse(JSON.stringify(bundled));
+    }
+  }
+  if (!canonicalDeviceSettingsSchema?.sections?.length) {
     const local = parseJson(DEVICE_SETTINGS_SCHEMA_PATH);
     if (local?.sections?.some((s) => s.id === 'bluetooth')) {
       canonicalDeviceSettingsSchema = JSON.parse(JSON.stringify(local));
     }
   }
-  if (canonicalDeviceSettingsSchema) {
+  if (canonicalDeviceSettingsSchema?.sections?.length) {
     canonicalDeviceSettingsSchema = OmoteSettingsForm.mergeProtectedSchemaSections(
       canonicalDeviceSettingsSchema, canonicalDeviceSettingsSchema);
   }
   return canonicalDeviceSettingsSchema;
 }
 
+/** Load schema + defaults on cold start (page reload before Connect). */
+async function bootstrapDeviceSettings({ pullRemote = false } = {}) {
+  await loadCanonicalDeviceSettingsSchema();
+  syncMergedDeviceSettingsSchemaFile(false);
+  if (!files.has(DEVICE_SETTINGS_PATH)) {
+    const schema = loadDeviceSettingsSchemaDoc();
+    setFile(DEVICE_SETTINGS_PATH, OmoteSettingsForm.defaultsFromSchema(schema), false);
+  }
+  refreshDeviceSettingsPanel();
+  if (pullRemote && API) {
+    try {
+      await pullDeviceSettingsFromRemote();
+    } catch (_) { /* bridge offline or schema not on device yet */ }
+  }
+}
+
+let deviceSettingsPanelReady = null;
+
+function ensureDeviceSettingsPanelReady(pullRemote = false) {
+  if (!deviceSettingsPanelReady) {
+    deviceSettingsPanelReady = bootstrapDeviceSettings({ pullRemote }).finally(() => {
+      deviceSettingsPanelReady = null;
+    });
+  }
+  return deviceSettingsPanelReady;
+}
+
+function bundledDeviceSettingsSchema() {
+  const bundled = OmoteSettingsForm.CANONICAL_DEVICE_SETTINGS_SCHEMA;
+  return bundled?.sections?.length ? bundled : DEFAULT_DEVICE_SETTINGS_SCHEMA;
+}
+
+/** Merge a partial on-disk / bridge schema with the full firmware schema (adds MQTT, NTP, etc.). */
+function mergeDeviceSettingsSchema(userSchema) {
+  const base = bundledDeviceSettingsSchema();
+  return OmoteSettingsForm.mergeProtectedSchemaSections(userSchema || {}, base);
+}
+
 function rememberCanonicalDeviceSettingsSchema(schema) {
   if (!schema?.sections?.length) return;
-  if (!canonicalDeviceSettingsSchema) {
-    canonicalDeviceSettingsSchema = JSON.parse(JSON.stringify(schema));
-    return;
+  const base = bundledDeviceSettingsSchema();
+  if (!canonicalDeviceSettingsSchema?.sections?.length) {
+    canonicalDeviceSettingsSchema = JSON.parse(JSON.stringify(base));
   }
   canonicalDeviceSettingsSchema = OmoteSettingsForm.mergeProtectedSchemaSections(
     canonicalDeviceSettingsSchema, schema);
+  canonicalDeviceSettingsSchema = OmoteSettingsForm.mergeProtectedSchemaSections(
+    canonicalDeviceSettingsSchema, base);
 }
 
 /** Keep firmware-defined settings sections/fields; backup may only change values. */
 function applyProtectedDeviceSettingsFiles(markDirty = true) {
-  if (!canonicalDeviceSettingsSchema) return false;
-  const mergedSchema = OmoteSettingsForm.mergeProtectedSchemaSections(
-    parseJson(DEVICE_SETTINGS_SCHEMA_PATH) || {}, canonicalDeviceSettingsSchema);
+  const mergedSchema = mergeDeviceSettingsSchema(parseJson(DEVICE_SETTINGS_SCHEMA_PATH));
+  if (!mergedSchema?.sections?.length) return false;
   setFile(DEVICE_SETTINGS_SCHEMA_PATH, mergedSchema, markDirty);
   const mergedValues = OmoteSettingsForm.mergeDeviceSettingsValues(
     parseJson(DEVICE_SETTINGS_PATH) || {}, mergedSchema);
   setFile(DEVICE_SETTINGS_PATH, mergedValues, markDirty);
   return true;
+}
+
+function syncMergedDeviceSettingsSchemaFile(markDirty = false) {
+  const before = files.get(DEVICE_SETTINGS_SCHEMA_PATH)?.content?.trim() || '';
+  const merged = mergeDeviceSettingsSchema(parseJson(DEVICE_SETTINGS_SCHEMA_PATH));
+  if (!merged?.sections?.length) return false;
+  const after = JSON.stringify(merged, null, 2);
+  const expanded = before !== after;
+  setFile(DEVICE_SETTINGS_SCHEMA_PATH, merged, markDirty || expanded);
+  return expanded;
 }
 const HA_DOMAINS = ['light', 'switch', 'cover', 'climate', 'sensor', 'media_player', 'fan', 'scene', 'script', 'input_boolean', 'lock', 'button'];
 const HA_EDITOR_PREFS_KEY = 'omote_oo_ha_editor_prefs';
@@ -762,8 +820,60 @@ const DEVICE_TEMPLATES = {
     label: 'AV receiver',
     pageFile: 'Pages/Page_AVReceiver.json',
     cmdFile: 'Commands/Commands_PanasonicTV.json'
+  },
+  googletv: {
+    label: 'Google TV / Chromecast (BLE HID)',
+    pageFile: 'Pages/Page_Roku.json',
+    cmdFile: 'Commands/Commands_GoogleTV.json',
+    commands: {
+      Manufacturer: 'Google TV',
+      DeviceClass: 'Streaming',
+      Commands: [
+        { Command: 'GTV_UP', Mode: 'BLE', Protocol: 'UP', Data: [] },
+        { Command: 'GTV_DOWN', Mode: 'BLE', Protocol: 'DOWN', Data: [] },
+        { Command: 'GTV_LEFT', Mode: 'BLE', Protocol: 'LEFT', Data: [] },
+        { Command: 'GTV_RIGHT', Mode: 'BLE', Protocol: 'RIGHT', Data: [] },
+        { Command: 'GTV_OK', Mode: 'BLE', Protocol: 'DPAD_CENTER', Data: [] },
+        { Command: 'GTV_BACK', Mode: 'BLE', Protocol: 'BACK', Data: [] },
+        { Command: 'GTV_HOME', Mode: 'BLE', Protocol: 'HOME', Data: [] },
+        { Command: 'GTV_VOL_UP', Mode: 'BLE', Protocol: 'VOLUME_UP', Data: [] },
+        { Command: 'GTV_VOL_DOWN', Mode: 'BLE', Protocol: 'VOLUME_DOWN', Data: [] },
+        { Command: 'GTV_MUTE', Mode: 'BLE', Protocol: 'MUTE', Data: [] },
+        { Command: 'GTV_PLAY_PAUSE', Mode: 'BLE', Protocol: 'PLAY_PAUSE', Data: [] },
+        { Command: 'GTV_NETFLIX', Mode: 'BLE', Protocol: 'NETFLIX', Data: [] },
+        { Command: 'GTV_YOUTUBE', Mode: 'BLE', Protocol: 'YOUTUBE', Data: [] },
+        { Command: 'GTV_PRIME', Mode: 'BLE', Protocol: 'PRIME_VIDEO', Data: [] },
+        { Command: 'GTV_DISNEY', Mode: 'BLE', Protocol: 'DISNEY_PLUS', Data: [] },
+        { Command: 'GTV_GUIDE', Mode: 'BLE', Protocol: 'GUIDE', Data: [] },
+        { Command: 'GTV_NOTIFICATION', Mode: 'BLE', Protocol: 'NOTIFICATION', Data: [] },
+        { Command: 'GTV_PROFILE', Mode: 'BLE', Protocol: 'PROFILE_SWITCH', Data: [] },
+        { Command: 'GTV_POWER', Mode: 'BLE', Protocol: 'POWER', Data: [] }
+      ]
+    }
   }
 };
+
+/** Seed bundled command libraries so Advanced → Commands shows BLE keys before first device tab. */
+function ensureBundledCommandLibrary() {
+  let seeded = false;
+  for (const tpl of Object.values(DEVICE_TEMPLATES)) {
+    if (!tpl?.cmdFile || files.has(tpl.cmdFile))
+      continue;
+    if (tpl.commands) {
+      setFile(tpl.cmdFile, JSON.parse(JSON.stringify(tpl.commands)), false);
+      seeded = true;
+      continue;
+    }
+    if (files.has(tpl.cmdFile))
+      continue;
+  }
+  const gtvPath = 'Commands/Commands_GoogleTV.json';
+  if (!files.has(gtvPath) && DEVICE_TEMPLATES.googletv?.commands) {
+    setFile(gtvPath, JSON.parse(JSON.stringify(DEVICE_TEMPLATES.googletv.commands)), false);
+    seeded = true;
+  }
+  return seeded;
+}
 
 /** Ensure fetch hits the device/sim host, not a path on the editor origin (needs http://). */
 function normalizeDeviceApiUrl(raw) {
@@ -1106,19 +1216,28 @@ function loadHaSettingsDoc() {
 function loadHaSettingsForm() {
   const doc = loadHaSettingsDoc();
   const prefs = JSON.parse(localStorage.getItem(HA_EDITOR_PREFS_KEY) || '{}');
-  if ($('ha-url')) $('ha-url').value = doc.Url || prefs.ha_url || '';
+  if ($('ha-url')) $('ha-url').value = normalizeHaUrl(doc.Url || prefs.ha_url || '');
   if ($('ha-token')) $('ha-token').value = doc.Token || prefs.ha_token || '';
 }
 
+function normalizeHaUrl(raw) {
+  let url = String(raw || '').trim().replace(/\/+$/, '');
+  if (!url) return '';
+  if (!/^https?:\/\//i.test(url)) url = 'http://' + url;
+  return url;
+}
+
 function saveHaSettingsToFiles() {
-  const url = ($('ha-url')?.value || '').trim().replace(/\/+$/, '');
+  const url = normalizeHaUrl($('ha-url')?.value);
+  if ($('ha-url')) $('ha-url').value = url;
   const token = ($('ha-token')?.value || '').trim();
   setFile(HA_SETTINGS_PATH, { Url: url, Token: token });
   localStorage.setItem(HA_EDITOR_PREFS_KEY, JSON.stringify({ ha_url: url, ha_token: token }));
 }
 
 function loadDeviceSettingsSchemaDoc() {
-  return parseJson(DEVICE_SETTINGS_SCHEMA_PATH) || DEFAULT_DEVICE_SETTINGS_SCHEMA;
+  const merged = mergeDeviceSettingsSchema(parseJson(DEVICE_SETTINGS_SCHEMA_PATH));
+  return merged?.sections?.length ? merged : bundledDeviceSettingsSchema();
 }
 
 function loadDeviceSettingsDoc() {
@@ -1127,13 +1246,18 @@ function loadDeviceSettingsDoc() {
 }
 
 function refreshDeviceSettingsPanel() {
+  syncMergedDeviceSettingsSchemaFile(false);
   const panel = $('device-settings-dynamic');
   if (!panel) return;
-  OmoteSettingsForm.renderDeviceSettingsForm(
-    panel,
-    loadDeviceSettingsSchemaDoc(),
-    loadDeviceSettingsDoc()
-  );
+  const schema = loadDeviceSettingsSchemaDoc();
+  OmoteSettingsForm.renderDeviceSettingsForm(panel, schema, loadDeviceSettingsDoc());
+  const hint = $('device-settings-schema-hint');
+  if (hint) {
+    const n = schema?.sections?.length || 0;
+    hint.textContent = n
+      ? `${n} setting section${n === 1 ? '' : 's'} (schema merged with firmware defaults in this editor).`
+      : '';
+  }
 }
 
 function deviceSettingsFromForm() {
@@ -1167,21 +1291,52 @@ async function syncDeviceSettingsFileFromRemote() {
 }
 
 async function pullDeviceSettingsFromRemote() {
+  let schemaLoaded = false;
   try {
     const schema = await api('/api/device/settings/schema');
     setFile(DEVICE_SETTINGS_SCHEMA_PATH, schema, false);
+    schemaLoaded = true;
   } catch {
     try {
       const r = await apiFsRead(DEVICE_SETTINGS_SCHEMA_PATH);
       setFile(DEVICE_SETTINGS_SCHEMA_PATH, r.content, false);
-    } catch { /* keep local / bundled schema */ }
+      schemaLoaded = !!parseJson(DEVICE_SETTINGS_SCHEMA_PATH)?.sections?.length;
+    } catch { /* fall through */ }
   }
+  if (!schemaLoaded) {
+    await loadCanonicalDeviceSettingsSchema();
+    if (canonicalDeviceSettingsSchema?.sections?.length)
+      setFile(DEVICE_SETTINGS_SCHEMA_PATH, canonicalDeviceSettingsSchema, false);
+  }
+  await loadCanonicalDeviceSettingsSchema();
+  syncMergedDeviceSettingsSchemaFile(false);
+  rememberCanonicalDeviceSettingsSchema(parseJson(DEVICE_SETTINGS_SCHEMA_PATH));
   await syncDeviceSettingsFileFromRemote();
+  refreshDeviceSettingsPanel();
+}
+
+function deviceSettingsPushResultMessage(st) {
+  if (st?.role === 'bridge') {
+    if (st.remote_linked) {
+      return 'Saved on bridge — ESP-NOW sync sent to the physical remote.';
+    }
+    return 'Saved on bridge — physical remote not linked. Wake the remote, then Settings → Bridge sync → Pull from bridge.';
+  }
+  return 'Device settings saved on remote.';
 }
 
 async function pushDeviceSettingsToRemote() {
   const body = deviceSettingsFromForm();
+  const schema = loadDeviceSettingsSchemaDoc();
   saveDeviceSettingsToFiles();
+  const schemaBody = JSON.stringify(schema, null, 2);
+  await api('/api/fs/write?path=' + encodeURIComponent(DEVICE_SETTINGS_SCHEMA_PATH), {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: schemaBody,
+    timeout: 15000,
+  });
+  files.set(DEVICE_SETTINGS_SCHEMA_PATH, { content: schemaBody, dirty: false });
   await api('/api/device/settings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1189,6 +1344,21 @@ async function pushDeviceSettingsToRemote() {
     timeout: 15000,
   });
   await syncDeviceSettingsFileFromRemote();
+  return api('/api/status', { timeout: 5000 }).catch(() => null);
+}
+
+async function ensureDeviceSettingsFromRemote() {
+  try {
+    await pullDeviceSettingsFromRemote();
+  } catch (e) {
+    const fromFiles = parseJson(DEVICE_SETTINGS_SCHEMA_PATH);
+    if (fromFiles?.sections?.length) {
+      rememberCanonicalDeviceSettingsSchema(fromFiles);
+      refreshDeviceSettingsPanel();
+      return;
+    }
+    throw e;
+  }
 }
 
 function getHaCredentials() {
@@ -1647,7 +1817,7 @@ function normalizeScenePagePaths() {
       }
     }
     if (changed) {
-      setFile(path, sc);
+      setFile(path, sc, false);
       fixed = true;
     }
   }
@@ -2382,6 +2552,7 @@ function showTab(name) {
   if (name === 'connect' || name === 'settings') {
     loadHaSettingsForm();
     refreshDeviceSettingsPanel();
+    ensureDeviceSettingsPanelReady(name === 'settings');
   }
   if (name === 'scenes') refreshScenesTab();
   if (name === 'commands') renderCommandsTable();
@@ -2432,6 +2603,7 @@ async function endEditorSession({ reboot = false } = {}) {
 function finishConnectUi(st, msg, kind = 'ok') {
   $('status-bar').textContent = formatStatusBar(st, editorSessionOnDevice ? ' · editor session' : '');
   setConnectMsg(msg, kind);
+  if (kind === 'ok') localStorage.setItem('omote_auto_connect', '1');
 }
 
 function markPathDirty(path) {
@@ -2473,6 +2645,7 @@ async function connectAndLoadInner(options = {}) {
 
     if (!hadEditorFiles || options.forceRemote) {
       await loadRemoteIntoEditor(tree);
+      await ensureDeviceSettingsFromRemote().catch(() => {});
       finishConnectUi(
         st,
         `Loaded ${files.size} files. Remote in sync mode (awake) until you leave the session.`,
@@ -2487,6 +2660,7 @@ async function connectAndLoadInner(options = {}) {
     const diff = diffEditorVsRemote(localFileMap(), remoteMap);
 
     if (!diff.hasDiff) {
+      await ensureDeviceSettingsFromRemote().catch(() => {});
       finishConnectUi(
         st,
         `Connected — editor matches remote (${files.size} files). Session active on remote.`,
@@ -2506,6 +2680,7 @@ async function connectAndLoadInner(options = {}) {
     }
     if (choice === 'remote') {
       await finishEditorFromRemoteMap(remoteMap, tree);
+      await ensureDeviceSettingsFromRemote().catch(() => {});
       finishConnectUi(st, `Loaded ${files.size} files from remote (editor copy replaced).`, 'ok');
       showTab('scenes');
       return;
@@ -2582,14 +2757,14 @@ function setSettingsMsg(text, cls) {
 $('btn-save-device-settings')?.addEventListener('click', async () => {
   setSettingsMsg('Saving device settings…');
   try {
-    const st = await api('/api/status').catch(() => null);
-    if (!st) {
+    const connected = await api('/api/status').catch(() => null);
+    if (!connected) {
       saveDeviceSettingsToFiles();
       setSettingsMsg('Saved in editor — connect and save again to push to remote.', 'ok');
       return;
     }
-    await pushDeviceSettingsToRemote();
-    setSettingsMsg('Device settings saved on remote and synced to editor.', 'ok');
+    const st = await pushDeviceSettingsToRemote();
+    setSettingsMsg(deviceSettingsPushResultMessage(st), st?.remote_linked === false ? 'muted' : 'ok');
   } catch (e) {
     saveDeviceSettingsToFiles();
     setSettingsMsg(`Saved locally only. (${e.message})`, 'err');
@@ -2624,7 +2799,8 @@ $('btn-save-ha')?.addEventListener('click', async () => {
       timeout: 15000,
     });
     files.get(HA_SETTINGS_PATH).dirty = false;
-    setConnectMsg('HA settings saved on remote (LittleFS). Taps work without reboot.', 'ok');
+    const where = st.role === 'bridge' ? 'bridge' : 'remote';
+    setConnectMsg(`HA settings saved on ${where} (LittleFS). Taps work without reboot.`, 'ok');
   } catch (e) {
     setConnectMsg(
       `Saved in editor only — use “Save to remote” to push all files. (${e.message})`,
@@ -2634,8 +2810,18 @@ $('btn-save-ha')?.addEventListener('click', async () => {
 });
 
 $('btn-test-ha')?.addEventListener('click', async () => {
+  saveHaSettingsToFiles();
   setConnectMsg('Testing Home Assistant…');
   try {
+    const st = await api('/api/status').catch(() => null);
+    if (st?.role === 'bridge') {
+      const r = await api('/api/ha/test', { timeout: 15000 });
+      if (r.ok) {
+        setConnectMsg(`Bridge reached HA — ${r.detail}`, 'ok');
+        return;
+      }
+      throw new Error(r.detail || `Bridge HA test failed (HTTP ${r.http_code})`);
+    }
     await haBrowserFetch('/api/');
     const data = await haBrowserListEntities('light', '');
     setConnectMsg(`Connected to HA — found ${data.entities.length} light entities (sample).`, 'ok');
@@ -2700,18 +2886,22 @@ $('btn-exit-sync').onclick = () => {
 };
 
 function initAfterLoad() {
+  if (ensureBundledCommandLibrary()) {
+    $('deploy-msg').textContent = 'Added bundled BLE command library (e.g. Google TV). Save to remote when ready.';
+    $('deploy-msg').className = 'msg ok';
+  }
   if (normalizeScenePagePaths()) {
     $('deploy-msg').textContent = 'Fixed scene tab paths (Pages/ prefix). Save to remote when ready.';
     $('deploy-msg').className = 'msg ok';
   }
   if (!files.has(HA_SETTINGS_PATH)) setFile(HA_SETTINGS_PATH, { Url: '', Token: '' }, false);
-  if (!files.has(DEVICE_SETTINGS_SCHEMA_PATH)) {
-    setFile(DEVICE_SETTINGS_SCHEMA_PATH, DEFAULT_DEVICE_SETTINGS_SCHEMA, false);
-  }
-  if (!files.has(DEVICE_SETTINGS_PATH)) setFile(DEVICE_SETTINGS_PATH, { ...DEFAULT_DEVICE_SETTINGS }, false);
-  rememberCanonicalDeviceSettingsSchema(parseJson(DEVICE_SETTINGS_SCHEMA_PATH));
   loadCanonicalDeviceSettingsSchema().then(() => {
-    if (applyProtectedDeviceSettingsFiles(false)) refreshDeviceSettingsPanel();
+    syncMergedDeviceSettingsSchemaFile(false);
+    if (!files.has(DEVICE_SETTINGS_PATH)) {
+      const schema = loadDeviceSettingsSchemaDoc();
+      setFile(DEVICE_SETTINGS_PATH, OmoteSettingsForm.defaultsFromSchema(schema), false);
+    }
+    refreshDeviceSettingsPanel();
   });
   loadHaSettingsForm();
   refreshDeviceSettingsPanel();
@@ -4163,6 +4353,21 @@ $('btn-add-command')?.addEventListener('click', () => {
   renderCommandsTable();
 });
 
+$('btn-import-gtv-commands')?.addEventListener('click', () => {
+  const path = 'Commands/Commands_GoogleTV.json';
+  const tpl = DEVICE_TEMPLATES.googletv?.commands;
+  if (!tpl) return;
+  setFile(path, JSON.parse(JSON.stringify(tpl)));
+  selectedCmdFile = path;
+  populateCmdFileSelect();
+  renderCommandsTable();
+  const msg = $('learn-msg');
+  if (msg) {
+    msg.textContent = `Loaded ${path} (${tpl.Commands.length} BLE keys). Save to remote to deploy on bridge.`;
+    msg.className = 'msg ok';
+  }
+});
+
 $('btn-new-cmd-file')?.addEventListener('click', () => {
   const name = prompt('File name:', 'Commands/MyDevice.json');
   if (!name) return;
@@ -4243,6 +4448,12 @@ function setDeployMsg(text, kind = '') {
   el.className = 'msg' + (kind ? ' ' + kind : '');
 }
 
+function deployFsPath(path) {
+  const p = normalizePackPath(path);
+  if (!p || !isPackConfigPath(p)) return '';
+  return p;
+}
+
 $('btn-deploy')?.addEventListener('click', async () => {
   setDeployMsg('Saving…');
   await loadCanonicalDeviceSettingsSchema();
@@ -4253,15 +4464,41 @@ $('btn-deploy')?.addEventListener('click', async () => {
     return;
   }
   try {
+    const st = await api('/api/status', { timeout: 8000 }).catch(() => null);
+    const isBridge = st?.role === 'bridge';
+    if (isBridge) {
+      registerOrphanSceneFiles({ ask: false });
+      const schema = loadDeviceSettingsSchemaDoc();
+      if (schema?.sections?.length) {
+        const schemaBody = JSON.stringify(schema, null, 2);
+        if (!files.has(DEVICE_SETTINGS_SCHEMA_PATH) ||
+            files.get(DEVICE_SETTINGS_SCHEMA_PATH)?.content !== schemaBody) {
+          setFile(DEVICE_SETTINGS_SCHEMA_PATH, schemaBody, true);
+        }
+      }
+      if (!files.has(DEVICE_SETTINGS_PATH)) {
+        setFile(DEVICE_SETTINGS_PATH, loadDeviceSettingsDoc(), true);
+      }
+    }
     // Do not enable editor_sync on deploy — that shows a full-screen overlay on the
     // remote which captures touch (only Power exits). HTTP keep-awake on the device is enough.
+    let deleted = 0;
     for (const path of toDelete) {
-      await api('/api/fs/delete?path=' + encodeURIComponent(path), { method: 'POST', timeout: 15000 });
+      const p = deployFsPath(path);
+      if (!p) {
+        remoteDeletes.delete(path);
+        continue;
+      }
+      await api('/api/fs/delete?path=' + encodeURIComponent(p), { method: 'POST', timeout: 15000 });
       remoteDeletes.delete(path);
+      deleted++;
     }
+    let saved = 0;
     for (const [path, entry] of dirty) {
+      const p = deployFsPath(path);
+      if (!p) continue;
       let body = entry.content;
-      if (path === DEVICE_SETTINGS_SCHEMA_PATH && canonicalDeviceSettingsSchema) {
+      if (p === DEVICE_SETTINGS_SCHEMA_PATH && canonicalDeviceSettingsSchema) {
         try {
           const parsed = JSON.parse(body);
           body = JSON.stringify(
@@ -4270,24 +4507,36 @@ $('btn-deploy')?.addEventListener('click', async () => {
             2);
         } catch (_) { /* deploy raw content */ }
       }
-      await api('/api/fs/write?path=' + encodeURIComponent(path), {
+      await api('/api/fs/write?path=' + encodeURIComponent(p), {
         method: 'POST', headers: { 'Content-Type': 'text/plain' }, body, timeout: 30000
       });
+      if (p !== path) {
+        files.delete(path);
+        files.set(p, { content: body, dirty: false });
+      } else {
+        entry.dirty = false;
+      }
+      saved++;
     }
     const onlySoftReload =
-      dirty.length > 0 && dirty.every(([p]) => SOFT_RELOAD_PATHS.has(p));
+      saved > 0 && dirty.every(([path]) => SOFT_RELOAD_PATHS.has(deployFsPath(path) || path));
     const parts = [];
-    if (dirty.length) parts.push(`saved ${dirty.length}`);
-    if (toDelete.length) parts.push(`deleted ${toDelete.length}`);
+    if (saved) parts.push(`saved ${saved}`);
+    if (deleted) parts.push(`deleted ${deleted}`);
     const summary = parts.join(', ');
-    if (!onlySoftReload) {
+    if (isBridge) {
+      editorSessionOnDevice = false;
+      setDeployMsg(
+        `${summary} on bridge. Linked remote re-pulls config over ESP-NOW automatically.`,
+        'ok'
+      );
+    } else if (!onlySoftReload) {
       await api('/api/device/reboot', { method: 'POST', timeout: 20000 });
       editorSessionOnDevice = false;
       setDeployMsg(`${summary}. Remote rebooting…`, 'ok');
     } else {
       setDeployMsg(`${summary} on remote (no reboot).`, 'ok');
     }
-    dirty.forEach(([p]) => { files.get(p).dirty = false; });
   } catch (e) {
     setDeployMsg(e.message, 'err');
   }
@@ -4345,11 +4594,15 @@ function bindCanvasPreview() {
   }, { passive: false });
 }
 
+ensureBundledCommandLibrary();
 populateBleKeySelects();
+populateCmdFileSelect();
 dismissBlockingOverlays();
 bindCanvasPreview();
 bindLayoutTools();
 applyAdvancedMode();
+
+bootstrapDeviceSettings().catch(() => {});
 
 if (
   localStorage.getItem('omote_auto_connect') === '1' &&

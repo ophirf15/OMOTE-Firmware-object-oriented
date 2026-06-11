@@ -1,0 +1,17 @@
+{
+  "name": "BleHost",
+  "version": "1.0.0",
+  "description": "NimBLE HID stack for OMOTE bridge host",
+  "build": {
+    "srcDir": "../esp32HalImpl/ble",
+    "srcFilter": ["+<ble_handler.cpp>", "+<ble_stub.cpp>"],
+    "includeDir": "../esp32HalImpl",
+    "flags": ["-I ../HAL"]
+  },
+  "dependencies": {
+    "h2zero/NimBLE-Arduino": "^1.4.3",
+    "ESP32-BLE-Keyboard": "*"
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

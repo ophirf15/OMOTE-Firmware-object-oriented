@@ -6,7 +6,9 @@
 
 #include <Arduino.h>
 
+#if !defined(OMOTE_BRIDGE_HOST)
 #include "HardwareFactory.hpp"
+#endif
 #include <BleKeyboard.h>
 #include <NimBLEDevice.h>
 #include <esp_bt.h>
@@ -243,8 +245,10 @@ static void bleInit() {
   }
   resetBtControllerToIdle();
   uint8_t battPct = 100;
+#if !defined(OMOTE_BRIDGE_HOST)
   if (auto batt = HardwareFactory::getAbstract().battery())
     battPct = (uint8_t)batt->getPercentage();
+#endif
   bleKeyboard.setBatteryLevel(battPct);
   const BleIdentity &id = activeIdentity();
   Serial.printf("BLE: identity '%s' → VID 0x%04X / PID 0x%04X\n", id.key, id.vid, id.pid);

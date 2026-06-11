@@ -23,7 +23,8 @@ bool loadFromLittleFS(bool forceReload) {
 
   auto doc = OMOTE::JSON::GetDocument(
       std::filesystem::path(FS_PATH "DeviceSettings.schema.json"));
-  if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("sections")) {
+  if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("sections") ||
+      !doc["sections"].IsArray()) {
     sLoaded = false;
     return false;
   }

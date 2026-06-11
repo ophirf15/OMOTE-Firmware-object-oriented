@@ -16,6 +16,10 @@
 #include "observerHandles.hpp"
 #include <Arduino.h>
 #include <fstream>
+#include <vector>
+#if defined(ARDUINO) && !defined(IS_SIMULATOR)
+#include <LittleFS.h>
+#endif
 
 using namespace UI::Page;
 using namespace Command;
@@ -49,6 +53,16 @@ std::filesystem::path resolvePageJsonPath(const std::string &fileName) {
   if (fileName.empty())
     return std::filesystem::path(FS_PATH);
   const std::filesystem::path direct(FS_PATH + fileName);
+#if defined(ARDUINO) && !defined(IS_SIMULATOR)
+  if (LittleFS.exists(direct.string().c_str()))
+    return direct;
+  if (fileName.rfind("Pages/", 0) != 0) {
+    const std::filesystem::path underPages(FS_PATH "Pages/" + fileName);
+    if (LittleFS.exists(underPages.string().c_str()))
+      return underPages;
+  }
+  return direct;
+#else
   {
     std::ifstream probe(direct);
     if (probe.good())
@@ -61,6 +75,7 @@ std::filesystem::path resolvePageJsonPath(const std::string &fileName) {
       return underPages;
   }
   return direct;
+#endif
 }
 
 void configureJsonPage(lv_obj_t *pageObj, bool verticalScroll) {
@@ -96,10 +111,51 @@ JsonPage::JsonPage(std::string aFileName, std::string aPageName, std::string aCo
 
   rapidjson::Document d = OMOTE::JSON::GetDocument(aPageJsonPath);
   if (d.HasParseError() || d.IsNull() || !d.IsObject()) {
+#if defined(ARDUINO) && !defined(IS_SIMULATOR)
+    const bool exists = LittleFS.exists(aPageJsonPath.string().c_str());
+    size_t fileSz = 0;
+    size_t bytesRead = 0;
+    uint32_t fileHash = 0;
+    std::vector<char> probeBuf;
+    if (exists) {
+      File probe = LittleFS.open(aPageJsonPath.string().c_str(), "r");
+      if (probe) {
+        fileSz = probe.size();
+        if (fileSz > 0 && fileSz <= 65536) {
+          probeBuf.resize(fileSz);
+          while (bytesRead < fileSz) {
+            const int got =
+                probe.read(reinterpret_cast<uint8_t *>(probeBuf.data()) + bytesRead, fileSz - bytesRead);
+            if (got <= 0)
+              break;
+            bytesRead += static_cast<size_t>(got);
+          }
+          if (bytesRead > 0) {
+            fileHash = 2166136261u;
+            for (size_t i = 0; i < bytesRead; ++i) {
+              fileHash ^= static_cast<uint8_t>(probeBuf[i]);
+              fileHash *= 16777619u;
+            }
+          }
+        }
+      }
+      probe.close();
+    }
+    Serial.printf(
+        "JsonPage: failed to load \"%s\" exists=%d size=%u read=%u parseErr=%u@%u hash=%08x heap=%u "
+        "(FileName=\"%s\")\n",
+        aPageJsonPath.c_str(), exists ? 1 : 0, static_cast<unsigned>(fileSz),
+        static_cast<unsigned>(bytesRead),
+        static_cast<unsigned>(d.HasParseError() ? d.GetParseError() : 0),
+        static_cast<unsigned>(d.HasParseError() ? d.GetErrorOffset() : 0), fileHash,
+        static_cast<unsigned>(ESP.getFreeHeap()), aFileName.c_str());
+#else
     Serial.printf("JsonPage: failed to load \"%s\" (scene FileName=\"%s\")\n", aPageJsonPath.c_str(),
                   aFileName.c_str());
+#endif
     return;
   }
+  mLoadedOk = true;
 
   if (d.HasMember("CommandFile") && d["CommandFile"].IsString()) {
     mCommandFile = d["CommandFile"].GetString();
@@ -155,26 +211,33 @@ JsonPage::JsonPage(std::string aFileName, std::string aPageName, std::string aCo
   if (d.HasMember("ButtonMaps") && d["ButtonMaps"].IsObject()) {
     for (Command::KeyIds id = Command::KeyIds::Power; id != Command::KeyIds::INVALID; id = (Command::KeyIds)((int)id + 1)) {
       auto key = magic_enum::enum_name(id);
-      if (d["ButtonMaps"].HasMember(key.data())) {
+      if (!key.data() || !key.data()[0])
+        continue;
+      if (!d["ButtonMaps"].HasMember(key.data()))
+        continue;
+      const rapidjson::Value &keyMap = d["ButtonMaps"][key.data()];
+      if (!keyMap.IsObject())
+        continue;
+      {
         Command::CommandStruct commandStruct;
-        if (d["ButtonMaps"][key.data()].HasMember("Press") && d["ButtonMaps"][key.data()]["Press"].IsString()) {
-          if (Command::Commands::getCommand(mCommandFile, aCommandPrefix, d["ButtonMaps"][key.data()]["Press"].GetString(), commandStruct) != Command::NONE)
+        if (keyMap.HasMember("Press") && keyMap["Press"].IsString()) {
+          if (Command::Commands::getCommand(mCommandFile, aCommandPrefix, keyMap["Press"].GetString(), commandStruct) != Command::NONE)
             mKeyHandlers.insert({id, {Command::KeyPressTypes::Press, commandStruct}});
         }
-        if (d["ButtonMaps"][key.data()].HasMember("Release") && d["ButtonMaps"][key.data()]["Release"].IsString()) {
-          if (Command::Commands::getCommand(mCommandFile, aCommandPrefix, d["ButtonMaps"][key.data()]["Release"].GetString(), commandStruct) != Command::NONE)
+        if (keyMap.HasMember("Release") && keyMap["Release"].IsString()) {
+          if (Command::Commands::getCommand(mCommandFile, aCommandPrefix, keyMap["Release"].GetString(), commandStruct) != Command::NONE)
             mKeyHandlers.insert({id, {Command::KeyPressTypes::Release, commandStruct}});
         }
-        if (d["ButtonMaps"][key.data()].HasMember("Repeat") && d["ButtonMaps"][key.data()]["Repeat"].IsString()) {
-          if (Command::Commands::getCommand(mCommandFile, aCommandPrefix, d["ButtonMaps"][key.data()]["Repeat"].GetString(), commandStruct) != Command::NONE)
+        if (keyMap.HasMember("Repeat") && keyMap["Repeat"].IsString()) {
+          if (Command::Commands::getCommand(mCommandFile, aCommandPrefix, keyMap["Repeat"].GetString(), commandStruct) != Command::NONE)
             mKeyHandlers.insert({id, {Command::KeyPressTypes::Repeat, commandStruct}});
         }
-        if (d["ButtonMaps"][key.data()].HasMember("Long") && d["ButtonMaps"][key.data()]["Long"].IsString()) {
-          if (Command::Commands::getCommand(mCommandFile, aCommandPrefix, d["ButtonMaps"][key.data()]["Long"].GetString(), commandStruct) != Command::NONE)
+        if (keyMap.HasMember("Long") && keyMap["Long"].IsString()) {
+          if (Command::Commands::getCommand(mCommandFile, aCommandPrefix, keyMap["Long"].GetString(), commandStruct) != Command::NONE)
             mKeyHandlers.insert({id, {Command::KeyPressTypes::Long, commandStruct}});
         }
-        if (d["ButtonMaps"][key.data()].HasMember("Short") && d["ButtonMaps"][key.data()]["Short"].IsString()) {
-          if (Command::Commands::getCommand(mCommandFile, aCommandPrefix, d["ButtonMaps"][key.data()]["Short"].GetString(), commandStruct) != Command::NONE)
+        if (keyMap.HasMember("Short") && keyMap["Short"].IsString()) {
+          if (Command::Commands::getCommand(mCommandFile, aCommandPrefix, keyMap["Short"].GetString(), commandStruct) != Command::NONE)
             mKeyHandlers.insert({id, {Command::KeyPressTypes::Short, commandStruct}});
         }
       }
@@ -194,10 +257,8 @@ JsonPage::~JsonPage() {
 void JsonPage::OnShow() {
   Base::OnShow();
   HaRuntime::setActivePage(this, mHaEntityIds);
-  if (mHaEntityIds.empty())
-    return;
-  applyHaStates();
-  HaRuntime::requestRefresh();
+  if (!mHaEntityIds.empty())
+    applyHaStates();
 }
 
 void JsonPage::OnHide() {

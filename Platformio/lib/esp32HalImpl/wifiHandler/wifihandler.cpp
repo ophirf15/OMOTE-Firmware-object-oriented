@@ -195,7 +195,9 @@ void wifiHandler::networkSync() {
     ftpSync();
     nptSync();
   }
+#if !OMOTE_BRIDGE_CLIENT
   config_http::sync();
+#endif
 }
 
 void wifiHandler::connect(std::string ssid, std::string password) {

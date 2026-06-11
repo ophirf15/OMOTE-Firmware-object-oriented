@@ -11,7 +11,9 @@
 #include "PopUpScreen.hpp"
 #include "ScreenManager.hpp"
 #include "Slider.hpp"
+#if OMOTE_BLE || (defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT)
 #include "BleSettings.hpp"
+#endif
 #include "SystemSettings.hpp"
 #include "WifiSettings.hpp"
 #include "device_settings_schema.hpp"
@@ -83,9 +85,11 @@ SettingsPage::SettingsPage()
   mSettingsList->AddItem("Backlight", LV_SYMBOL_SETTINGS, [this] { PushDisplaySettings(); }, SettingItemHeight);
   mSettingsList->AddItem("Device", LV_SYMBOL_SETTINGS, [this] { PushSystemSettings(); }, mHeight);
 
+#if OMOTE_BLE || (defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT)
   mSettingsList->AddItem("Bluetooth", LV_SYMBOL_BLUETOOTH, [] {
     UI::Screen::Manager::getInstance().pushPopUp(std::make_unique<BleSettings>());
   }, SettingItemHeight);
+#endif
 
   if (!device_settings_schema::isLoaded())
     device_settings_schema::loadFromLittleFS();

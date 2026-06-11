@@ -7,6 +7,7 @@
 #include "RapidJsonUtilty.hpp"
 
 #include <Arduino.h>
+#include <ESPmDNS.h>
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiUdp.h>
@@ -127,14 +128,22 @@ bool parseHaBaseUrl(const std::string &urlIn, std::string &host, uint16_t &port,
 }
 
 bool resolveHostToIp(const std::string &host, std::string &ipOut) {
-  if (host.find('.') != std::string::npos && host != "homeassistant.local") {
-    IPAddress addr;
-    if (addr.fromString(host.c_str())) {
-      ipOut = host;
-      return true;
-    }
+  IPAddress addr;
+  if (addr.fromString(host.c_str())) {
+    ipOut = host;
+    return true;
   }
-  IPAddress ip;
+
+  std::string mdnsName = host;
+  if (mdnsName.size() > 6 && mdnsName.compare(mdnsName.size() - 6, 6, ".local") == 0)
+    mdnsName.erase(mdnsName.size() - 6);
+
+  IPAddress ip = MDNS.queryHost(mdnsName.c_str(), 3000);
+  if (ip) {
+    ipOut = ip.toString().c_str();
+    return true;
+  }
+
   if (WiFi.hostByName(host.c_str(), ip) != 1)
     return false;
   ipOut = ip.toString().c_str();

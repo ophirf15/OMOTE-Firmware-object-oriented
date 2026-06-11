@@ -62,7 +62,8 @@ python -m http.server 8080</pre>
         </label>
         <p class="muted small">3661 adds Home, Guide, device keys (TV, Stream, STB…), and replaces the four color aux keys.</p>
 
-        <p class="muted small">Layout from <code>DeviceSettings.schema.json</code>; values in <code>DeviceSettings.json</code>. Same files drive the on-device Settings → Device page.</p>
+        <p class="muted small">Layout from <code>DeviceSettings.schema.json</code>; values in <code>DeviceSettings.json</code>. The bridge only stores what you deploy — the editor merges in the full firmware schema here. Same files drive the on-device Settings menu after ESP-NOW sync.</p>
+        <p id="device-settings-schema-hint" class="muted small"></p>
         <div id="device-settings-dynamic"></div>
         <div class="row">
           <button type="button" id="btn-save-device-settings">Save device settings</button>
@@ -152,6 +153,7 @@ python -m http.server 8080</pre>
                 <select id="device-template" title="Template for new device tab">
                   <option value="tv">TV (buttons + numpad)</option>
                   <option value="roku">Streaming / Roku</option>
+                  <option value="googletv">Google TV (BLE)</option>
                   <option value="avreceiver">AV receiver</option>
                   <option value="blank">Blank — learn everything</option>
                 </select>
@@ -389,6 +391,7 @@ python -m http.server 8080</pre>
           <table id="cmd-table"><thead><tr><th>Name</th><th>Mode</th><th>Protocol / BLE key</th><th>Data</th><th></th></tr></thead><tbody></tbody></table>
           <div class="row">
             <button type="button" id="btn-add-command">+ Add</button>
+            <button type="button" id="btn-import-gtv-commands">Import Google TV BLE</button>
             <button type="button" id="btn-learn-ir">Learn IR</button>
           </div>
           <p id="learn-msg" class="msg"></p>
@@ -409,7 +412,7 @@ python -m http.server 8080</pre>
     <span id="deploy-msg" class="msg"></span>
   </footer>
   <script src="./jszip.min.js"></script>
-  <script src="./settings-form.js"></script>
-  <script src="./app.js"></script>
+  <script src="./settings-form.js?v=5"></script>
+  <script src="./app.js?v=6"></script>
 </body>
 </html>

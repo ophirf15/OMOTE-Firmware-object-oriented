@@ -9,10 +9,16 @@
 #include "UiOverlayGate.hpp"
 #include "ble_scene.hpp"
 #include "Label.hpp"
+#include "device_settings.hpp"
+#if defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT && !OMOTE_BLE
+#include "bridge_client.hpp"
+#include "omote_link.hpp"
+#endif
 #ifndef IS_SIMULATOR
+#if OMOTE_BLE
 #include "HaWebSocket.hpp"
 #endif
-#include "device_settings.hpp"
+#endif
 
 using namespace UI::Page;
 
@@ -37,6 +43,14 @@ static void stopTimer(lv_timer_t *&timer) {
   }
 }
 
+#if defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT && !OMOTE_BLE
+bool bridgeBleLinked() {
+  return bridge_client::linked();
+}
+#else
+bool bridgeBleLinked() { return true; }
+#endif
+
 } // namespace
 
 BleSettings::BleSettings() : Base(ID::Pages::BleSettings), mBle(HardwareFactory::getAbstract().ble()) {
@@ -53,7 +67,11 @@ BleSettings::BleSettings() : Base(ID::Pages::BleSettings), mBle(HardwareFactory:
   mStatusLabel->AlignTo(this, LV_ALIGN_TOP_LEFT, 0, 4);
 
   mHintLabel = AddNewElement<Widget::Label>(
+#if defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT && !OMOTE_BLE
+      "BLE HID runs on the bridge at your TV. Pair from here, then use BLE scenes on the remote.");
+#else
       "Pair from here or use a scene with BleEnabled. Keys send only in BLE scenes.");
+#endif
   mHintLabel->SetWidth(width);
   mHintLabel->AlignTo(mStatusLabel, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 4);
 
@@ -88,16 +106,25 @@ BleSettings::BleSettings() : Base(ID::Pages::BleSettings), mBle(HardwareFactory:
     anchor = btn;
   };
 
+#if defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT && !OMOTE_BLE
+  if (!bridgeBleLinked()) {
+    auto *unavail = AddNewElement<Widget::Label>("Bridge not linked — wake remote and wait for ESP-NOW.");
+    unavail->SetWidth(width);
+    unavail->AlignTo(anchor, LV_ALIGN_OUT_BOTTOM_LEFT, 0, kGap);
+    return;
+  }
+#else
   if (!mBle) {
     auto *unavail = AddNewElement<Widget::Label>("BLE not available on this build.");
     unavail->SetWidth(width);
     unavail->AlignTo(anchor, LV_ALIGN_OUT_BOTTOM_LEFT, 0, kGap);
     return;
   }
+#endif
 
   addActionButton("Start pairing", [this] {
     UiOverlayGate::prepareRam();
-#ifndef IS_SIMULATOR
+#if OMOTE_BLE && !defined(IS_SIMULATOR)
     HaWebSocket::suspendForBlePairing();
 #endif
     ble_scene::requestSettingsPairing();
@@ -106,17 +133,27 @@ BleSettings::BleSettings() : Base(ID::Pages::BleSettings), mBle(HardwareFactory:
   });
 
   addActionButton("Disconnect", [this] {
+#if defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT && !OMOTE_BLE
+    bridge_client::sendBleControl(static_cast<uint8_t>(omote_link::BleControlAction::Disconnect));
+    bridge_client::requestBleStatus();
+#else
     if (!ensureBleReady())
       return;
     mBle->disconnectClients();
+#endif
     refreshStatus();
   });
 
   addActionButton("Forget bonds", [this] {
+#if defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT && !OMOTE_BLE
+    bridge_client::sendBleControl(static_cast<uint8_t>(omote_link::BleControlAction::ForgetBonds));
+    bridge_client::requestBleStatus();
+#else
     if (!ensureBleReady())
       return;
     mBle->forgetBonds();
     ble_scene::markBleRunning();
+#endif
     refreshStatus();
   });
 
@@ -128,6 +165,9 @@ BleSettings::BleSettings() : Base(ID::Pages::BleSettings), mBle(HardwareFactory:
 BleSettings::~BleSettings() { stopTimer(mRefreshTimer); }
 
 bool BleSettings::ensureBleReady() {
+#if defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT && !OMOTE_BLE
+  return bridgeBleLinked();
+#endif
   if (!mBle)
     return false;
 #ifndef IS_SIMULATOR
@@ -146,25 +186,60 @@ bool BleSettings::ensureBleReady() {
 }
 
 void BleSettings::applyProfile(const std::string &profileKey) {
-  if (!mBle || profileKey.empty())
+  if (profileKey.empty())
     return;
-  mBle->setProfile(profileKey);
   rapidjson::Document patch;
   patch.SetObject();
   auto &a = patch.GetAllocator();
   patch.AddMember("ble_profile", rapidjson::Value(profileKey.c_str(), a), a);
   device_settings::mergeFromJson(patch);
   device_settings::saveToLittleFS();
+#if defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT && !OMOTE_BLE
+  bridge_client::sendBleControl(static_cast<uint8_t>(omote_link::BleControlAction::SetProfile), profileKey);
+  bridge_client::requestBleStatus();
+#else
+  if (!mBle)
+    return;
+  mBle->setProfile(profileKey);
   if (!ensureBleReady())
     return;
   mBle->forgetBonds();
   ble_scene::markBleRunning();
+#endif
   refreshStatus();
 }
 
 void BleSettings::refreshStatus() {
   if (!mStatusLabel)
     return;
+#if defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT && !OMOTE_BLE
+  bridge_client::requestBleStatus();
+  if (!bridgeBleLinked()) {
+    mStatusLabel->SetText("BLE: bridge not linked");
+    return;
+  }
+  if (ble_scene::settingsPairingPending()) {
+    mStatusLabel->SetText("BLE: starting… look for Omote Remote on TV");
+    return;
+  }
+  const auto &st = bridge_client::bleStatus();
+  if (!st.valid) {
+    mStatusLabel->SetText("BLE: waiting for bridge status…");
+    return;
+  }
+  std::string text = "BLE: ";
+  text += st.connected ? "connected" : "off";
+  if (st.pairing)
+    text += " (pairing)";
+  if (st.advertising)
+    text += " adv";
+  text += st.initialized ? " · ready on bridge" : " · idle on bridge";
+  if (!st.profile.empty()) {
+    text += " · ";
+    text += st.profile;
+  }
+  mStatusLabel->SetText(text);
+#elif OMOTE_BLE
   if (!mBle) {
     mStatusLabel->SetText("BLE: unavailable");
     return;
@@ -190,6 +265,9 @@ void BleSettings::refreshStatus() {
 #endif
   }
   mStatusLabel->SetText(text);
+#else
+  mStatusLabel->SetText("BLE: unavailable");
+#endif
 }
 
 void BleSettings::OnShow() {
@@ -207,7 +285,7 @@ void BleSettings::OnShow() {
 
 void BleSettings::OnHide() {
   stopTimer(mRefreshTimer);
-#ifndef IS_SIMULATOR
+#if OMOTE_BLE && !defined(IS_SIMULATOR)
   HaWebSocket::resumeAfterBlePairing();
 #endif
   Base::OnHide();

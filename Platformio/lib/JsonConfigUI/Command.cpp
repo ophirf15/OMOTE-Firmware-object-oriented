@@ -1,6 +1,11 @@
 #include "Command.hpp"
 #include "HardwareFactory.hpp"
+#if OMOTE_BLE
 #include "ble_scene.hpp"
+#elif defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT
+#include "ble_scene.hpp"
+#include "bridge_client.hpp"
+#endif
 #include <fstream>
 #include <unordered_map>
 
@@ -79,10 +84,15 @@ void Commands::sendCommand(const CommandStruct &aCommandStruct) {
         !aCommandStruct.protocol.empty()
             ? aCommandStruct.protocol
             : (aCommandStruct.data.empty() ? std::string() : aCommandStruct.data[0]);
-    if (!key.empty()) {
-      ble_scene::requestBleStart();
-      if (auto ble = HardwareFactory::getAbstract().ble())
-        ble->sendKey(key);
-    }
+    if (key.empty())
+      return;
+#if OMOTE_BLE
+    ble_scene::requestBleStart();
+    if (auto ble = HardwareFactory::getAbstract().ble())
+      ble->sendKey(key);
+#elif defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT
+    ble_scene::requestBleStart();
+    bridge_client::sendBleKey(key);
+#endif
   }
 }

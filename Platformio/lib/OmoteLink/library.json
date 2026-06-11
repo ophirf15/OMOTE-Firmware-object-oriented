@@ -1,0 +1,12 @@
+{
+  "name": "OmoteLink",
+  "version": "0.1.0",
+  "description": "ESP-NOW link between OMOTE remote and bridge",
+  "authors": [],
+  "dependencies": {},
+  "build": {
+    "includeDir": "."
+  },
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

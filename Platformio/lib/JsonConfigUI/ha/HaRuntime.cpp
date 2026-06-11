@@ -1,8 +1,10 @@
 #include "HaRuntime.hpp"
 
-
-
+#if OMOTE_BRIDGE_CLIENT
+#include "bridge_client.hpp"
+#else
 #include "HaWebSocket.hpp"
+#endif
 
 #include "JsonPage.hpp"
 
@@ -245,12 +247,20 @@ void onWsState(const std::string &entityId, const std::string &state, const std:
 
 
 void refreshSettings() {
+#if OMOTE_BRIDGE_CLIENT
+  (void)gSettings;
+#else
   gSettings = loadSettingsFile();
   HaWebSocket::setSettings(gSettings.url, gSettings.token);
+#endif
 }
 
 void pushSubscription() {
+#if OMOTE_BRIDGE_CLIENT
+  bridge_client::subscribeEntities(gActiveEntities);
+#else
   HaWebSocket::subscribeEntities(gActiveEntities);
+#endif
 }
 
 } // namespace
@@ -262,21 +272,30 @@ namespace HaRuntime {
 
 
 void init() {
-  refreshSettings();
   loadStateCacheFile();
   gLastCacheSaveMs = millis();
-
+#if OMOTE_BRIDGE_CLIENT
+  bridge_client::init();
+  Serial.println("HA> bridge client mode (calls via ESP-NOW)");
+#else
+  refreshSettings();
   HaWebSocket::setStateCallback(onWsState);
   HaWebSocket::start();
   if (configured())
     Serial.println("HA> HaSettings loaded");
   else
     Serial.println("HA> HaSettings.json missing Url or Token");
+#endif
 }
 
 
 
 void reloadSettingsFromDisk() {
+#if OMOTE_BRIDGE_CLIENT
+  Serial.println("HA> bridge mode — HA settings live on bridge");
+  if (!gActiveEntities.empty())
+    pushSubscription();
+#else
   refreshSettings();
   if (gSettings.ok()) {
     Serial.println("HA> settings reloaded from LittleFS");
@@ -285,17 +304,21 @@ void reloadSettingsFromDisk() {
   } else {
     Serial.println("HA> settings reload: HaSettings.json missing Url or Token");
   }
+#endif
 }
 
 void tick() {
-  HaWebSocket::tick();
-
   const uint32_t now = millis();
+#if OMOTE_BRIDGE_CLIENT
+  bridge_client::tick();
+#else
+  HaWebSocket::tick();
   static uint32_t sLastSettingsReload = 0;
   if (!gOverlayActive && now - sLastSettingsReload >= 30000) {
     sLastSettingsReload = now;
     refreshSettings();
   }
+#endif
 
   if (!configured())
     return;
@@ -311,16 +334,21 @@ void tick() {
 
 
 
-bool configured() { return gSettings.ok(); }
+bool configured() {
+#if OMOTE_BRIDGE_CLIENT
+  return bridge_client::linked();
+#else
+  return gSettings.ok();
+#endif
+}
 
 
 
 bool callService(const std::string &domain, const std::string &service, const std::string &entityId) {
-  refreshSettings();
   if (entityId.empty())
     return false;
   if (!configured()) {
-    Serial.println("HA> tap ignored: save HA settings to remote (HaSettings.json on LittleFS)");
+    Serial.println("HA> tap ignored: bridge not linked");
     return false;
   }
 
@@ -332,16 +360,20 @@ bool callService(const std::string &domain, const std::string &service, const st
   std::string svc = service.empty() ? "toggle" : service;
 
   Serial.printf("HA> tap %s.%s %s\n", dom.c_str(), svc.c_str(), entityId.c_str());
+#if OMOTE_BRIDGE_CLIENT
+  return bridge_client::callHa(dom, svc, entityId);
+#else
+  refreshSettings();
   return HaWebSocket::callServiceRest(dom, svc, entityId);
+#endif
 }
 
 bool callServiceWithData(const std::string &domain, const std::string &service, const std::string &entityId,
                          const std::string &serviceDataJson) {
-  refreshSettings();
   if (entityId.empty())
     return false;
   if (!configured()) {
-    Serial.println("HA> tap ignored: save HA settings to remote (HaSettings.json on LittleFS)");
+    Serial.println("HA> tap ignored: bridge not linked");
     return false;
   }
 
@@ -353,7 +385,12 @@ bool callServiceWithData(const std::string &domain, const std::string &service, 
   std::string svc = service.empty() ? "turn_on" : service;
 
   Serial.printf("HA> call %s.%s %s\n", dom.c_str(), svc.c_str(), entityId.c_str());
+#if OMOTE_BRIDGE_CLIENT
+  return bridge_client::callHa(dom, svc, entityId, serviceDataJson);
+#else
+  refreshSettings();
   return HaWebSocket::callServiceRestWithData(dom, svc, entityId, serviceDataJson);
+#endif
 }
 
 bool getCachedAttributes(const std::string &entityId, std::string &attributesJsonOut) {
@@ -367,12 +404,19 @@ bool getCachedAttributes(const std::string &entityId, std::string &attributesJso
 }
 
 bool fetchEntityState(const std::string &entityId) {
+#if OMOTE_BRIDGE_CLIENT
+  if (entityId.empty())
+    return false;
+  bridge_client::requestHaEntityPoll(entityId);
+  return true;
+#else
   std::string state;
   std::string attrs;
   if (!HaWebSocket::fetchEntityStateRest(entityId, state, attrs))
     return false;
   upsertState(entityId, state, attrs);
   return true;
+#endif
 }
 
 
@@ -465,6 +509,30 @@ void setOverlayActive(bool active) {
 }
 
 bool overlayActive() { return gOverlayActive; }
+
+#if OMOTE_BRIDGE_CLIENT
+void applyBridgeHaState(const char *entityId, const char *state) {
+  if (!entityId || !state)
+    return;
+  std::string attrs;
+  if (auto *e = findState(entityId))
+    attrs = e->attributesJson;
+  upsertState(entityId, state, attrs);
+  if (!gOverlayActive)
+    gUiRefreshPending = true;
+}
+
+void applyBridgeHaAttrs(const char *entityId, const char *attributesJson) {
+  if (!entityId || !attributesJson)
+    return;
+  std::string state;
+  if (auto *e = findState(entityId))
+    state = e->state;
+  upsertState(entityId, state, attributesJson);
+  if (!gOverlayActive)
+    gUiRefreshPending = true;
+}
+#endif
 
 } // namespace HaRuntime
 

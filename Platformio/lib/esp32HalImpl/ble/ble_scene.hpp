@@ -36,7 +36,8 @@ void requestSettingsPairing();
 
 bool settingsPairingPending();
 
-
+/** Bridge-client: clear settings pairing spinner when bridge reports status. */
+void notifyRemoteBleStatus(bool pairing, bool connected, bool initialized);
 
 void setEditorSyncActive(bool active);
 

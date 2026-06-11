@@ -45,9 +45,6 @@ public:
   /** Re-read page JSON from LittleFS for the current scene (after editor deploy). */
   void reloadCurrentSceneFromDisk();
 
-  /** Refresh scene list after bridge config pull over ESP-NOW. */
-  void onBridgeConfigSynced(const std::vector<std::string> &manifestFiles);
-
   /** Free scene tab RAM before settings/other overlays allocate UI (call via UiOverlayGate). */
   void prepareForOverlay();
 
@@ -77,9 +74,9 @@ protected:
   struct SceneFinishParams {
     std::string fileName;
     bool restoreScene = false;
+    bool bleEnabled = false;
     uint16_t tabIdx = 0;
     bool showScene = true;
-    bool bleEnabled = false;
   };
 
   void bindTabChangeHandler();
@@ -90,6 +87,7 @@ protected:
   void unloadInactiveTabs(uint16_t activeIdx);
   void suspendSceneTabForOverlay();
   void resumeSceneTabAfterOverlay();
+  bool activeSceneBleEnabled() const;
   void setupLazySceneTabs(std::vector<SceneTabSpec> specs, SceneFinishParams finish);
   void finalizeSceneDisplay(const SceneFinishParams &params);
 

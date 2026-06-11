@@ -34,4 +34,9 @@ void requestRefresh();
 void setOverlayActive(bool active);
 bool overlayActive();
 
+#if OMOTE_BRIDGE_CLIENT
+void applyBridgeHaState(const char *entityId, const char *state);
+void applyBridgeHaAttrs(const char *entityId, const char *attributesJson);
+#endif
+
 } // namespace HaRuntime

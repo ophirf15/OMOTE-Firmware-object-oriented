@@ -12,29 +12,16 @@
 #include "SettingsPage.hpp"
 #include "ble_scene.hpp"
 #include "editor_sync_mode.hpp"
-#if OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
-#include "BridgeSyncPage.hpp"
-#endif
 #ifndef IS_SIMULATOR
 #include <Arduino.h>
-#include <LittleFS.h>
 #include "display.hpp"
 #include "device_settings.hpp"
-#include "device_settings_schema.hpp"
 #endif
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
-#include <set>
 
 using namespace UI::Screen;
-
-#if OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
-#include "bridge_client.hpp"
-namespace {
-JsonHomeScreen *sHomeForBridge = nullptr;
-} // namespace
-#endif
 
 #define RTC_SIG 0x128934ab56cd78ef
 #define RTC_STR_SIZE 100
@@ -73,9 +60,6 @@ JsonHomeScreen::JsonHomeScreen(DeviceFactory &aFactory)
   // Init Factory to allow building of Json devices
   aFactory.InitJsonFactory();
   HaRuntime::init();
-#if OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
-  sHomeForBridge = this;
-#endif
   std::fprintf(stderr, "[JsonHomeScreen] HaRuntime init done\n");
   std::fflush(stderr);
 
@@ -84,16 +68,10 @@ JsonHomeScreen::JsonHomeScreen(DeviceFactory &aFactory)
 
   mStatusBar->SetTopButtonLabel("Select Scene");
 
-#if OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
-  mStatusBar->AddExtraSettingItem({"Bridge sync", LV_SYMBOL_REFRESH, [] {
-    return UI::Page::Base::Ptr(std::make_unique<Page::BridgeSyncPage>());
-  }});
-#else
   mStatusBar->AddExtraSettingItem({"Editor sync", LV_SYMBOL_REFRESH, [] {
     editor_sync_mode::enter(true);
     return UI::Page::Base::Ptr{};
   }});
-#endif
 
   static constexpr auto ContentHeight =
       SCREEN_HEIGHT - Widget::StatusBar::Height;
@@ -103,24 +81,17 @@ JsonHomeScreen::JsonHomeScreen(DeviceFactory &aFactory)
   mTabView->AlignTo(mStatusBar, LV_ALIGN_OUT_BOTTOM_MID);
   mTabView->SetVisiblity(false);
 
-#ifndef IS_SIMULATOR
-#if OMOTE_BRIDGE_CLIENT
-  // Bridge is config authority — no local scene list or key bindings until ESP-NOW sync.
-  RtcLastState.signature = 0;
-  mStatusBar->SetTopButtonLabel("Syncing config…");
-  Serial.println("[JsonHomeScreen] bridge client — waiting for config sync");
-#else
   populateSceneListFromDisk();
+
+#ifndef IS_SIMULATOR
   if (RtcLastState.signature == RTC_SIG) {
     const std::string restoredScene = RtcLastState.currentScene;
     LvglResourceManager::GetInstance().QueueForLater([this, restoredScene]() {
       displayScenePage(restoredScene, true);
     });
   }
-#endif
 #else
   RtcLastState.signature = 0;
-  populateSceneListFromDisk();
 #endif
 
   mStatusBar->AddDebugSettingItem({"Test Actions", LV_SYMBOL_LIST, [this] {
@@ -162,10 +133,7 @@ void JsonHomeScreen::bindTabChangeHandler() {
 }
 
 void JsonHomeScreen::clearScene() {
-#ifndef IS_SIMULATOR
   ble_scene::disarmSceneBle();
-#endif
-  mOverlaySuspendedTabIdx = -1;
   Command::Commands::releaseCachedDocuments();
   mSceneTabSpecs.clear();
   mTabLoaded.clear();
@@ -222,23 +190,13 @@ void JsonHomeScreen::applyTabOverrides(uint16_t tabIdx, Page::JsonPage &page) {
 }
 
 void JsonHomeScreen::ensureTabLoaded(uint16_t tabIdx) {
-  if (mOverlaySuspendedTabIdx >= 0)
-    return;
   if (tabIdx >= mSceneTabSpecs.size() || tabIdx >= mTabLoaded.size() || mTabLoaded[tabIdx])
     return;
 #ifndef IS_SIMULATOR
   Serial.printf("[Scene] load tab %u heap=%u\n", static_cast<unsigned>(tabIdx), ESP.getFreeHeap());
 #endif
   auto page = buildTabPage(mSceneTabSpecs[tabIdx]);
-  auto *jsonPage = static_cast<Page::JsonPage *>(page.get());
-  if (!jsonPage->isLoaded()) {
-#ifndef IS_SIMULATOR
-    Serial.printf("[Scene] tab %u page not loaded heap=%u\n", static_cast<unsigned>(tabIdx),
-                  ESP.getFreeHeap());
-#endif
-    return;
-  }
-  applyTabOverrides(tabIdx, *jsonPage);
+  applyTabOverrides(tabIdx, *static_cast<Page::JsonPage *>(page.get()));
   mTabView->LoadTabContent(tabIdx, std::move(page));
   mTabLoaded[tabIdx] = true;
 }
@@ -256,8 +214,20 @@ void JsonHomeScreen::unloadInactiveTabs(uint16_t activeIdx) {
   }
 }
 
+bool JsonHomeScreen::activeSceneBleEnabled() const {
+  if (mLastScene.empty())
+    return false;
+  const std::filesystem::path scenePath(FS_PATH + mLastScene);
+  rapidjson::Document d = OMOTE::JSON::GetDocument(scenePath);
+  return d.HasMember("BleEnabled") && d["BleEnabled"].IsBool() && d["BleEnabled"].GetBool();
+}
+
 void JsonHomeScreen::prepareForOverlay() {
   suspendSceneTabForOverlay();
+#ifndef IS_SIMULATOR
+  if (mTabView && mTabView->IsSetVisible())
+    ble_scene::disarmSceneBle();
+#endif
 }
 
 void JsonHomeScreen::suspendSceneTabForOverlay() {
@@ -288,6 +258,8 @@ void JsonHomeScreen::resumeSceneTabAfterOverlay() {
     ensureTabLoaded(idx);
     mTabView->OnShow();
 #ifndef IS_SIMULATOR
+    if (activeSceneBleEnabled())
+      ble_scene::armSceneBle(true);
     Serial.printf("[Scene] resume tab %u after overlay heap=%u\n", static_cast<unsigned>(idx), ESP.getFreeHeap());
 #endif
   });
@@ -332,93 +304,16 @@ void JsonHomeScreen::finalizeSceneDisplay(const SceneFinishParams &params) {
     mTabView->SetVisiblity(false);
     mList->SetVisiblity(true);
   }
-#ifndef IS_SIMULATOR
   ble_scene::armSceneBle(params.bleEnabled);
-  Serial.printf("[Scene] ready %s tabs=%u loaded=%u heap=%u ble=%d\n", params.fileName.c_str(),
+#ifndef IS_SIMULATOR
+  Serial.printf("[Scene] ready %s tabs=%u loaded=%u heap=%u\n", params.fileName.c_str(),
                 static_cast<unsigned>(mTabView->TabCount()),
                 static_cast<unsigned>(mTabView->HasTabContent(params.tabIdx) ? 1 : 0),
-                ESP.getFreeHeap(), params.bleEnabled ? 1 : 0);
+                ESP.getFreeHeap());
 #endif
 }
-
-namespace {
-
-bool jsonHasObjectMember(const rapidjson::Value &value, const char *member) {
-  return value.IsObject() && value.HasMember(member);
-}
-
-std::string sceneDisplayNameFromPath(const std::string &fileName) {
-  std::string name = fileName;
-  const std::string prefix = "Scenes/Scene_";
-  if (name.rfind(prefix, 0) == 0)
-    name = name.substr(prefix.size());
-  if (name.size() > 5 && name.compare(name.size() - 5, 5, ".json") == 0)
-    name = name.substr(0, name.size() - 5);
-  for (char &c : name) {
-    if (c == '_')
-      c = ' ';
-  }
-  return name;
-}
-
-bool isSceneListedInRegistry(const std::string &fileName) {
-  rapidjson::Document d = OMOTE::JSON::GetDocument(std::filesystem::path(FS_PATH "Scenes.json"));
-  if (d.HasParseError() || !jsonHasObjectMember(d, "Scenes") || !d["Scenes"].IsArray())
-    return false;
-  for (rapidjson::SizeType i = 0; i < d["Scenes"].Size(); i++) {
-    const auto &scene = d["Scenes"][i];
-    if (!scene.IsObject() || !jsonHasObjectMember(scene, "FileName") || !scene["FileName"].IsString())
-      continue;
-    if (fileName == scene["FileName"].GetString())
-      return true;
-  }
-  return false;
-}
-
-bool sceneFileOnDisk(const std::string &fileName) {
-#if !defined(IS_SIMULATOR)
-  const String path = String(FS_PATH) + fileName.c_str();
-  return LittleFS.exists(path.c_str());
-#else
-  return std::filesystem::exists(std::filesystem::path(FS_PATH + fileName));
-#endif
-}
-
-std::vector<std::string> sBridgeManifestCache;
-
-bool isSceneListedInManifest(const std::string &fileName) {
-#if OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
-  if (!bridge_client::configSynced())
-    return false;
-#endif
-  if (!sceneFileOnDisk(fileName))
-    return false;
-#if OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
-  if (isSceneListedInRegistry(fileName))
-    return true;
-  for (const auto &path : sBridgeManifestCache) {
-    if (path == fileName)
-      return true;
-  }
-  return false;
-#else
-  return isSceneListedInRegistry(fileName);
-#endif
-}
-
-} // namespace
 
 void JsonHomeScreen::displayScenePage(const std::string &aFileName, bool restoreScene, bool showScene) {
-#if OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
-  if (!bridge_client::configSynced()) {
-    Serial.printf("[Scene] blocked %s — bridge config not synced yet\n", aFileName.c_str());
-    return;
-  }
-  if (!isSceneListedInManifest(aFileName)) {
-    Serial.printf("[Scene] blocked %s — not in Scenes.json\n", aFileName.c_str());
-    return;
-  }
-#endif
   std::filesystem::path aFilePath(FS_PATH + aFileName);
   rapidjson::Document d = OMOTE::JSON::GetDocument(aFilePath);
 
@@ -433,15 +328,15 @@ void JsonHomeScreen::displayScenePage(const std::string &aFileName, bool restore
   Serial.printf("[Scene] opening %s heap=%u\n", aFileName.c_str(), ESP.getFreeHeap());
 #endif
 
-  bool bleEnabled = d.HasMember("BleEnabled") && d["BleEnabled"].IsBool() && d["BleEnabled"].GetBool();
+  bool bleEnabled = false;
+  if (d.HasMember("BleEnabled") && d["BleEnabled"].IsBool())
+    bleEnabled = d["BleEnabled"].GetBool();
 
   if (mLastScene == aFileName) {
     mTabView->SetVisiblity(true);
     mList->SetVisiblity(false);
     lv_obj_fade_in(mTabView->LvglSelf(), 400, 0);
-#ifndef IS_SIMULATOR
     ble_scene::armSceneBle(bleEnabled);
-#endif
     return; // no scene change, just bring existing tabview back up
   }
 
@@ -533,9 +428,9 @@ void JsonHomeScreen::displayScenePage(const std::string &aFileName, bool restore
   SceneFinishParams finish;
   finish.fileName = aFileName;
   finish.restoreScene = restoreScene;
+  finish.bleEnabled = bleEnabled;
   finish.tabIdx = restoreScene ? RtcLastState.tabIdx : 0;
   finish.showScene = showScene;
-  finish.bleEnabled = bleEnabled;
   LvglResourceManager::GetInstance().QueueForLater([this, tabSpecs = std::move(tabSpecs),
                                                     finish = std::move(finish)]() mutable {
     setupLazySceneTabs(std::move(tabSpecs), std::move(finish));
@@ -574,10 +469,6 @@ bool JsonHomeScreen::OnKeyEvent(KeyPressAbstract::KeyEvent aKeyEvent) {
     }
   }
   // scene slection keys first
-#if OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
-  if (!bridge_client::configSynced())
-    return false;
-#endif
   {
     auto range = mSceneKeyHandlers.equal_range(aKeyEvent.mId);
     if (range.first != mSceneKeyHandlers.end()) {
@@ -615,87 +506,58 @@ void JsonHomeScreen::sendExitSequence() {
   mSavedExitSeq.clear();
 }
 
+namespace {
+
+bool isSceneListedInManifest(const std::string &fileName) {
+  rapidjson::Document d = OMOTE::JSON::GetDocument(std::filesystem::path(FS_PATH "Scenes.json"));
+  if (!d.HasMember("Scenes") || !d["Scenes"].IsArray())
+    return false;
+  for (rapidjson::SizeType i = 0; i < d["Scenes"].Size(); i++) {
+    const auto &scene = d["Scenes"][i];
+    if (scene.HasMember("FileName") && scene["FileName"].IsString() &&
+        fileName == scene["FileName"].GetString())
+      return true;
+  }
+  return false;
+}
+
+} // namespace
+
 void JsonHomeScreen::populateSceneListFromDisk() {
   mList->ClearItems();
   mSceneKeyHandlers.clear();
 
-  std::set<std::string> added;
+  rapidjson::Document d = OMOTE::JSON::GetDocument(std::filesystem::path(FS_PATH "Scenes.json"));
+  if (!d.HasMember("Scenes") || !d["Scenes"].IsArray())
+    return;
 
-  auto addSceneItem = [&](const std::string &fileName, const std::string &sceneName,
-                          const rapidjson::Value *registryEntry) {
-    if (!added.insert(fileName).second)
-      return;
+  for (rapidjson::SizeType i = 0; i < d["Scenes"].Size(); i++) {
+    auto &scene = d["Scenes"][i];
+    if (!scene.HasMember("FileName") || !scene["FileName"].IsString())
+      continue;
+
+    std::string fileName = scene["FileName"].GetString();
+    std::string sceneName;
+    if (scene.HasMember("SceneName") && scene["SceneName"].IsString())
+      sceneName = scene["SceneName"].GetString();
+    else
+      sceneName = fileName;
+
     const auto symbol = checkSceneForEntryExit(fileName) ? LV_SYMBOL_WIFI : LV_SYMBOL_MINUS;
     mList->AddItem(sceneName, symbol, [this, fileName] {
       LvglResourceManager::GetInstance().QueueForLater([this, fileName]() {
         displayScenePage(fileName, false);
       });
     });
-    if (registryEntry && registryEntry->IsObject() && jsonHasObjectMember(*registryEntry, "BindToKey") &&
-        jsonHasObjectMember(*registryEntry, "PressType") && (*registryEntry)["BindToKey"].IsString() &&
-        (*registryEntry)["PressType"].IsString()) {
-      const auto id = magic_enum::enum_cast<KeyIds>((*registryEntry)["BindToKey"].GetString());
-      const auto type = magic_enum::enum_cast<KeyPressTypes>((*registryEntry)["PressType"].GetString());
+
+    if (scene.HasMember("BindToKey") && scene["BindToKey"].IsString() &&
+        scene.HasMember("PressType") && scene["PressType"].IsString()) {
+      const auto id = magic_enum::enum_cast<KeyIds>(scene["BindToKey"].GetString());
+      const auto type = magic_enum::enum_cast<KeyPressTypes>(scene["PressType"].GetString());
       if (id.has_value() && type.has_value())
         mSceneKeyHandlers.insert({id.value(), {type.value(), fileName}});
     }
-  };
-
-  rapidjson::Document registry = OMOTE::JSON::GetDocument(std::filesystem::path(FS_PATH "Scenes.json"));
-
-  auto findRegistryEntry = [&registry](const std::string &fileName) -> const rapidjson::Value * {
-    if (registry.HasParseError() || !jsonHasObjectMember(registry, "Scenes") || !registry["Scenes"].IsArray())
-      return nullptr;
-    for (rapidjson::SizeType i = 0; i < registry["Scenes"].Size(); i++) {
-      const auto &scene = registry["Scenes"][i];
-      if (!scene.IsObject() || !jsonHasObjectMember(scene, "FileName") || !scene["FileName"].IsString())
-        continue;
-      if (fileName == scene["FileName"].GetString())
-        return &scene;
-    }
-    return nullptr;
-  };
-
-#if OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
-  for (const auto &fileName : sBridgeManifestCache) {
-    if (fileName.size() <= 7 || fileName.compare(0, 7, "Scenes/") != 0 ||
-        fileName.size() <= 5 || fileName.compare(fileName.size() - 5, 5, ".json") != 0)
-      continue;
-    if (!sceneFileOnDisk(fileName)) {
-      Serial.printf("[JsonHomeScreen] skip missing scene file %s\n", fileName.c_str());
-      continue;
-    }
-    std::string sceneName = sceneDisplayNameFromPath(fileName);
-    const rapidjson::Value *reg = findRegistryEntry(fileName);
-    if (reg && reg->IsObject() && jsonHasObjectMember(*reg, "SceneName") && (*reg)["SceneName"].IsString())
-      sceneName = (*reg)["SceneName"].GetString();
-    else {
-      rapidjson::Document sceneDoc =
-          OMOTE::JSON::GetDocument(std::filesystem::path(FS_PATH + fileName));
-      if (!sceneDoc.HasParseError() && jsonHasObjectMember(sceneDoc, "ScreenName") &&
-          sceneDoc["ScreenName"].IsString())
-        sceneName = sceneDoc["ScreenName"].GetString();
-    }
-    addSceneItem(fileName, sceneName, reg);
   }
-#else
-  if (!registry.HasParseError() && jsonHasObjectMember(registry, "Scenes") && registry["Scenes"].IsArray()) {
-    for (rapidjson::SizeType i = 0; i < registry["Scenes"].Size(); i++) {
-      auto &scene = registry["Scenes"][i];
-      if (!scene.IsObject() || !jsonHasObjectMember(scene, "FileName") || !scene["FileName"].IsString())
-        continue;
-      const std::string fileName = scene["FileName"].GetString();
-      if (!sceneFileOnDisk(fileName))
-        continue;
-      std::string sceneName;
-      if (jsonHasObjectMember(scene, "SceneName") && scene["SceneName"].IsString())
-        sceneName = scene["SceneName"].GetString();
-      else
-        sceneName = sceneDisplayNameFromPath(fileName);
-      addSceneItem(fileName, sceneName, &scene);
-    }
-  }
-#endif
 }
 
 void JsonHomeScreen::reloadCurrentSceneFromDisk() {
@@ -759,6 +621,7 @@ void JsonHomeScreen::reloadCurrentSceneFromDisk() {
 }
 
 void JsonHomeScreen::GoToSceneSelection(const std::string &aNewScene) {
+  ble_scene::disarmSceneBle();
   if (mTabView->IsSetVisible())
     mTabView->OnHide();
   mTabView->SetVisiblity(false);
@@ -790,70 +653,3 @@ void JsonHomeScreen::OnLvglEvent(lv_event_t *aEvent) {
     // Serial.printf("Restore tab Idx set to: %d\r\n",RtcLastState.tabIdx);
   }
 }
-
-void JsonHomeScreen::onBridgeConfigSynced(const std::vector<std::string> &manifestFiles) {
-  sBridgeManifestCache = manifestFiles;
-  HaRuntime::reloadSettingsFromDisk();
-
-#if OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
-  if (bridge_client::isSyncedConfigFile("DeviceSettings.schema.json")) {
-    if (device_settings_schema::loadFromLittleFS(true))
-      Serial.println("[JsonHomeScreen] device settings schema reloaded");
-  }
-  if (bridge_client::isSyncedConfigFile("DeviceSettings.json")) {
-    if (device_settings::loadFromLittleFS(true)) {
-      device_settings::applyToHardware();
-      Serial.println("[JsonHomeScreen] device settings applied");
-    }
-  }
-#endif
-
-  RtcLastState.signature = 0;
-  Command::Commands::releaseCachedDocuments();
-
-  if (!mLastScene.empty()) {
-    sendExitSequence();
-    clearScene();
-    mLastScene.clear();
-    mLastStartSeq.clear();
-  }
-
-  populateSceneListFromDisk();
-  mTabView->SetVisiblity(false);
-  mList->SetVisiblity(true);
-  lv_obj_fade_in(mList->LvglSelf(), 400, 0);
-  mStatusBar->SetTopButtonLabel("Select Scene");
-  HardwareFactory::getAbstract().setInScene(false);
-
-  unsigned sceneCount = 0;
-  for (const auto &fileName : sBridgeManifestCache) {
-    if (fileName.size() > 7 && fileName.compare(0, 7, "Scenes/") == 0 && fileName.size() > 5 &&
-        fileName.compare(fileName.size() - 5, 5, ".json") == 0)
-      sceneCount++;
-  }
-  unsigned shown = 0;
-  Serial.printf("[JsonHomeScreen] bridge config synced — %u scene(s) on picker:\n", sceneCount);
-  for (const auto &fileName : sBridgeManifestCache) {
-    if (fileName.size() <= 7 || fileName.compare(0, 7, "Scenes/") != 0)
-      continue;
-    if (!sceneFileOnDisk(fileName))
-      continue;
-    shown++;
-    Serial.printf("[JsonHomeScreen]   %s\n", fileName.c_str());
-  }
-  if (!shown)
-    Serial.println("[JsonHomeScreen] picker empty — check bridge Scenes/ and ESP-NOW sync");
-}
-
-#if OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
-void bridge_client_onConfigSynced(bool chainResync, const std::vector<std::string> &manifest) {
-  if (!sHomeForBridge)
-    return;
-  const std::vector<std::string> manifestSnap = manifest;
-  LvglResourceManager::GetInstance().QueueForLater([home = sHomeForBridge, manifestSnap, chainResync]() {
-    home->onBridgeConfigSynced(manifestSnap);
-    if (chainResync)
-      bridge_client::requestQueuedResync();
-  });
-}
-#endif

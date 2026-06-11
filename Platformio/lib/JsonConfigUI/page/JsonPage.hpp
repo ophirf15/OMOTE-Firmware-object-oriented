@@ -21,6 +21,8 @@ public:
   JsonPage(std::string aFileName, std::string aPageName, std::string aCommandPrefix);
   virtual ~JsonPage();
 
+  bool isLoaded() const { return mLoadedOk; }
+
   bool OnKeyEvent(KeyPressAbstract::KeyEvent aKeyEvent) override;
 
   void OnShow() override;
@@ -68,6 +70,7 @@ private:
   static constexpr auto distBetweenWidgets = 3;
   std::string mCommandFile;
   std::multimap<Command::KeyIds, Command::KeyStruct> mKeyHandlers;
+  bool mLoadedOk = false;
 };
 
 } // namespace UI::Page

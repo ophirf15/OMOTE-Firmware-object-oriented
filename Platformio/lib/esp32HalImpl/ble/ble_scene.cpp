@@ -2,11 +2,12 @@
 
 #include <Arduino.h>
 
-#include "HardwareFactory.hpp"
 #include "device_settings.hpp"
 #include "editor_sync_mode.hpp"
 
 #if OMOTE_BLE
+
+#include "HardwareFactory.hpp"
 
 namespace ble_scene {
 
@@ -111,6 +112,8 @@ void requestSettingsPairing() {
 }
 
 bool settingsPairingPending() { return sSettingsPairingPending; }
+
+void notifyRemoteBleStatus(bool, bool, bool) {}
 
 void setEditorSyncActive(bool active) {
   if (sEditorSyncActive == active)
@@ -224,6 +227,75 @@ void loop() {
 
 } // namespace ble_scene
 
+#elif defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT
+
+#include "bridge_client.hpp"
+#include "device_settings.hpp"
+
+namespace ble_scene {
+
+namespace {
+bool sSceneArmed = false;
+bool sEditorSyncActive = false;
+bool sSettingsPairingPending = false;
+} // namespace
+
+void armSceneBle(bool enabled) {
+  sSceneArmed = enabled;
+  if (enabled)
+    bridge_client::sendBleControl(static_cast<uint8_t>(omote_link::BleControlAction::ArmScene));
+  else
+    bridge_client::sendBleControl(static_cast<uint8_t>(omote_link::BleControlAction::DisarmScene));
+}
+
+void disarmSceneBle() {
+  const bool wasArmed = sSceneArmed;
+  armSceneBle(false);
+  if (wasArmed)
+    bridge_client::onBleSceneDisarmed();
+}
+
+bool sceneBleArmed() { return sSceneArmed; }
+
+void requestBleStart() {
+  if (!sSceneArmed || sEditorSyncActive)
+    return;
+  bridge_client::sendBleControl(static_cast<uint8_t>(omote_link::BleControlAction::EnsureRunning));
+}
+
+void markBleRunning() {}
+
+void requestSettingsPairing() {
+  sSettingsPairingPending = true;
+  const std::string profile = device_settings::currentConst().bleProfile;
+  bridge_client::sendBleControl(static_cast<uint8_t>(omote_link::BleControlAction::StartPairing), profile);
+  bridge_client::requestBleStatus();
+}
+
+bool settingsPairingPending() { return sSettingsPairingPending; }
+
+void notifyRemoteBleStatus(bool pairing, bool connected, bool initialized) {
+  if (sSettingsPairingPending && (pairing || connected || (initialized && !pairing)))
+    sSettingsPairingPending = false;
+}
+
+void setEditorSyncActive(bool active) {
+  sEditorSyncActive = active;
+  if (active)
+    disarmSceneBle();
+}
+
+bool editorSyncActive() { return sEditorSyncActive; }
+
+void onDisplayWake(uint32_t) {}
+
+void loop() {
+  if (sSettingsPairingPending)
+    bridge_client::requestBleStatus();
+}
+
+} // namespace ble_scene
+
 #else // !OMOTE_BLE
 
 namespace ble_scene {
@@ -235,6 +307,7 @@ void requestBleStart() {}
 void markBleRunning() {}
 void requestSettingsPairing() {}
 bool settingsPairingPending() { return false; }
+void notifyRemoteBleStatus(bool, bool, bool) {}
 void setEditorSyncActive(bool) {}
 bool editorSyncActive() { return false; }
 void onDisplayWake(uint32_t) {}

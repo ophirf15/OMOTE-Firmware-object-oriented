@@ -26,8 +26,6 @@ void onUiOverlayGate(bool active) {
 #ifndef IS_SIMULATOR
   HaRuntime::setOverlayActive(active);
 #endif
-  if (active && gOverlayHomeScreen)
-    gOverlayHomeScreen->prepareForOverlay();
 }
 } // namespace
 
@@ -100,10 +98,6 @@ void JsonUI::InitHomeScreen() {
   mJsonHomeScreen = homeScreen.get();
   gOverlayHomeScreen = mJsonHomeScreen;
   UiOverlayGate::setHandler(onUiOverlayGate);
-  UiOverlayGate::setPrepareHandler([]() {
-    if (gOverlayHomeScreen)
-      gOverlayHomeScreen->prepareForOverlay();
-  });
   Screen::Manager::getInstance().pushScreen(std::move(homeScreen));
 };
 

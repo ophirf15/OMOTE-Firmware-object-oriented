@@ -8,8 +8,16 @@
 #include "device_settings_schema.hpp"
 #include "display.hpp"
 #include "driver/rtc_io.h"
+#if OMOTE_BLE
 #include "ble_handler.hpp"
+#endif
+#if OMOTE_BLE || OMOTE_BRIDGE_CLIENT
 #include "ble_scene.hpp"
+#endif
+#if OMOTE_BRIDGE_CLIENT
+#include "bridge_client.hpp"
+#include "omote_link.hpp"
+#endif
 #include "editor_sync_mode.hpp"
 #include "esp32WebSocket.hpp"
 #include "esp_log.h"
@@ -133,7 +141,11 @@ void HardwareRevX::init() {
   mWifiHandler->setupNtp();
 
   mWifiHandler->ftpRestoreCredentials();
+#if !OMOTE_BRIDGE_CLIENT
   config_http::begin(mWifiHandler->mDNSGetName().c_str());
+#else
+  Serial.println("[remote] HTTP editor disabled — use bridge at http://omote.local");
+#endif
 
   // TODO Could IR be a weak ref only used when needed then deallocate?
   mIr = std::make_shared<IRTransceiver>(logger());
@@ -505,11 +517,30 @@ void HardwareRevX::loopHandler() {
   static int32_t battVoltage = 0;
 
   mWifiHandler->networkSync();
+#if OMOTE_BRIDGE_CLIENT
+  {
+    static bool linkStarted = false;
+    if (WiFi.status() == WL_CONNECTED) {
+      if (!linkStarted) {
+        omote_link::init(omote_link::Role::Client);
+        linkStarted = true;
+        Serial.println("[OLP] client starting (bridge link)");
+      }
+      omote_link::tick();
+    }
+  }
+#endif
+#if OMOTE_BLE || OMOTE_BRIDGE_CLIENT
   ble_scene::loop();
+#endif
 
   const bool portalActive = mWifiHandler->isPortalActive();
   const bool editorActive = editor_sync_mode::isActive();
+#if OMOTE_BRIDGE_CLIENT
+  const bool remoteActive = false;
+#else
   const bool remoteActive = config_http::isRemoteSessionActive();
+#endif
   const bool keepAwake = portalActive || editorActive || remoteActive;
   const auto &ds = device_settings::currentConst();
   if (!keepAwake)
