@@ -17,6 +17,7 @@ public:
   Tab(lv_obj_t *aTab, Base::Ptr aContent);
 
   bool HasContent() const { return mContent != nullptr; }
+  Page::Base *GetContent() const { return mContent; }
   void SetContent(Base::Ptr aContent);
   void ClearContent();
 
@@ -38,6 +39,8 @@ public:
   void UnloadTabContent(uint16_t aTabIdx);
   bool HasTabContent(uint16_t aTabIdx) const;
   size_t TabCount() const { return mTabs.size(); }
+  Tab *GetCurrentTab();
+  const Tab *GetCurrentTab() const;
 
   uint16_t GetCurrentTabIdx();
   void SetCurrentTabIdx(uint16_t aTabToSetActive,
@@ -58,8 +61,6 @@ public:
 
 protected:
   void OnLvglEvent(lv_event_t *anEvent) override;
-
-  Page::Tab *GetCurrentTab();
 
 private:
   void HandleTabChange();

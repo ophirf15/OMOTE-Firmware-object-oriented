@@ -610,14 +610,18 @@ function isKeyOnCurrentPcb(keyId) {
   return !PCB3661_ONLY_KEYS.includes(keyId);
 }
 
+function allPcbKeyOptions() {
+  const keys = Object.keys(KEY_LABELS)
+    .filter((k) => k !== 'Power' && isKeyOnCurrentPcb(k))
+    .sort((a, b) => (KEY_LABELS[a] || a).localeCompare(KEY_LABELS[b] || b));
+  return [['', 'None'], ...keys.map((k) => [k, KEY_LABELS[k] || k])];
+}
+
 function refreshSceneBindKeyOptions() {
   const sel = $('scene-bind-key');
   if (!sel) return;
   const cur = sel.value;
-  const pairs = getPcbVariant() === '3661'
-    ? [['', 'None'], ['TV', 'TV'], ['Stream', 'Stream'], ['Audio', 'Audio'], ['STB', 'STB'], ['DVD', 'DVD'], ['BluRay', 'Bluray'], ['Home', 'Home']]
-    : [['', 'None'], ['TV', 'TV'], ['Stream', 'Stream'], ['BluRay', 'BluRay'], ['Audio', 'Audio'],
-      ['Aux1', 'Aux1 (Red)'], ['Aux2', 'Aux2 (Green)'], ['Aux3', 'Aux3 (Yellow)'], ['Aux4', 'Aux4 (Blue)']];
+  const pairs = allPcbKeyOptions();
   sel.innerHTML = '';
   pairs.forEach(([value, label]) => {
     const o = document.createElement('option');
@@ -1838,6 +1842,121 @@ function setSceneRegistry(reg) {
   setFile('Scenes.json', reg);
 }
 
+function findSceneBindingForKey(keyName, pressType = 'Press') {
+  return (sceneRegistry().Scenes || []).find((s) => {
+    if (s.BindToKey !== keyName) return false;
+    return (s.PressType || 'Press') === pressType;
+  }) || null;
+}
+
+function clearSceneBindingsForKey(keyName, pressType, exceptFileName = null) {
+  const reg = sceneRegistry();
+  let changed = false;
+  (reg.Scenes || []).forEach((s) => {
+    if (exceptFileName && s.FileName === exceptFileName) return;
+    if (s.BindToKey === keyName && (s.PressType || 'Press') === pressType) {
+      delete s.BindToKey;
+      delete s.PressType;
+      delete s.TabIndex;
+      changed = true;
+    }
+  });
+  if (changed) setSceneRegistry(reg);
+  return changed;
+}
+
+function assignSceneToPhysicalKey(sceneFileName, keyName, pressType, tabIndex = 0) {
+  clearSceneBindingsForKey(keyName, pressType);
+  const reg = sceneRegistry();
+  const hit = reg.Scenes?.find((s) => s.FileName === sceneFileName);
+  if (!hit) return false;
+  hit.BindToKey = keyName;
+  hit.PressType = pressType;
+  if (tabIndex > 0) hit.TabIndex = tabIndex;
+  else delete hit.TabIndex;
+  setSceneRegistry(reg);
+  return true;
+}
+
+function clearPhysicalKeyPageMapping(keyName, pressType) {
+  const page = currentPage();
+  if (!page.ButtonMaps?.[keyName]?.[pressType]) return false;
+  delete page.ButtonMaps[keyName][pressType];
+  if (!Object.keys(page.ButtonMaps[keyName]).length) delete page.ButtonMaps[keyName];
+  savePage(page);
+  return true;
+}
+
+function sceneTabLabel(sceneFile, tabIndex) {
+  const scene = parseJson(sceneFile);
+  const page = scene?.Pages?.[tabIndex];
+  if (!page) return tabIndex > 0 ? `tab ${tabIndex + 1}` : 'first tab';
+  return page.ShortName || page.PageName || `Tab ${tabIndex + 1}`;
+}
+
+function populateSceneTabSelect(selectEl, sceneFile, selectedIdx = 0) {
+  if (!selectEl) return;
+  selectEl.innerHTML = '';
+  const scene = parseJson(sceneFile);
+  const pages = scene?.Pages || [];
+  if (!pages.length) {
+    const o = document.createElement('option');
+    o.value = '0';
+    o.textContent = 'First tab';
+    selectEl.appendChild(o);
+    return;
+  }
+  pages.forEach((p, i) => {
+    const o = document.createElement('option');
+    o.value = String(i);
+    o.textContent = p.ShortName || p.PageName || `Tab ${i + 1}`;
+    if (i === selectedIdx) o.selected = true;
+    selectEl.appendChild(o);
+  });
+}
+
+function describePhysicalKeyMapping(keyName, pressType = 'Press') {
+  const sceneHit = findSceneBindingForKey(keyName, pressType);
+  if (sceneHit) {
+    const tab = sceneHit.TabIndex != null ? sceneTabLabel(sceneHit.FileName, sceneHit.TabIndex) : '';
+    const name = sceneHit.SceneName || sceneHit.FileName;
+    return tab ? `Scene · ${name} · ${tab}` : `Scene · ${name}`;
+  }
+  return describeKeyMapping(getKeyMappingValue(keyName, pressType), selectedPagePath);
+}
+
+function keyHasAnyMapping(keyName) {
+  if (findSceneBindingForKey(keyName, 'Press')) return true;
+  const page = currentPage();
+  const map = page.ButtonMaps?.[keyName];
+  if (map && Object.keys(map).length) return true;
+  return !!(sceneRegistry().Scenes || []).some((s) => s.BindToKey === keyName);
+}
+
+function populateKeyScenePick(selectedFile = '') {
+  const sel = $('key-scene-pick');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— pick scene —</option>';
+  (sceneRegistry().Scenes || []).forEach((s) => {
+    const o = document.createElement('option');
+    o.value = s.FileName;
+    o.textContent = s.SceneName || s.FileName;
+    if (s.FileName === selectedFile) o.selected = true;
+    sel.appendChild(o);
+  });
+  const file = selectedFile || sel.value;
+  const hit = (sceneRegistry().Scenes || []).find((s) => s.FileName === file);
+  populateKeySceneTabPick(file, hit?.TabIndex ?? 0);
+}
+
+function populateKeySceneTabPick(sceneFile, selectedIdx = 0) {
+  populateSceneTabSelect($('key-scene-tab-pick'), sceneFile, selectedIdx);
+}
+
+function populateKeyTabPick(selectedIdx = 0) {
+  populateSceneTabSelect($('key-tab-pick'), selectedScenePath, selectedIdx);
+}
+
 function sceneRegistryEntry() {
   return sceneRegistry().Scenes?.find((s) => s.FileName === selectedScenePath) || null;
 }
@@ -2201,6 +2320,17 @@ function describeKeyMapping(val, pagePath) {
     const svc = val.Service || 'toggle';
     return `HA · ${svc} · ${val.EntityId || ''}`.replace(/ · $/, '');
   }
+  if (val.Action === 'Tab' || (val.TabIndex != null && !val.SceneFile && val.Action !== 'Scene')) {
+    const scene = parseJson(selectedScenePath);
+    const idx = val.TabIndex ?? 0;
+    const tab = scene?.Pages?.[idx];
+    const label = tab ? (tab.ShortName || tab.PageName) : `tab ${idx + 1}`;
+    return `Tab · ${label}`;
+  }
+  if (val.Action === 'Scene' || val.SceneFile) {
+    const idx = val.TabIndex ?? 0;
+    return `Scene · ${val.SceneFile}${idx ? ` · ${sceneTabLabel(val.SceneFile, idx)}` : ''}`;
+  }
   return 'Custom action';
 }
 
@@ -2232,6 +2362,18 @@ function currentPage() {
 
 function savePage(page) {
   setFile(selectedPagePath, page);
+}
+
+/** Scene OverrideKeys make transport keys work on every tab in multi-page scenes. */
+function ensureOverrideKeyForActivePage(keyName) {
+  if (!keyName || !selectedScenePath || activeTabIdx < 0) return;
+  const scene = parseJson(selectedScenePath);
+  const pageEntry = scene?.Pages?.[activeTabIdx];
+  if (!pageEntry) return;
+  pageEntry.OverrideKeys = pageEntry.OverrideKeys || [];
+  if (pageEntry.OverrideKeys.includes(keyName)) return;
+  pageEntry.OverrideKeys.push(keyName);
+  setFile(selectedScenePath, scene);
 }
 
 function getCommandRow(cmdFile, name) {
@@ -2983,7 +3125,8 @@ function refreshScenesTab() {
     const li = document.createElement('li');
     const entry = s.SceneName || s.FileName;
     const bind = s.BindToKey ? ` · ${s.BindToKey}` : '';
-    li.textContent = entry + bind;
+    const tabHint = s.TabIndex != null && s.TabIndex > 0 ? ` → ${sceneTabLabel(s.FileName, s.TabIndex)}` : '';
+    li.textContent = entry + bind + tabHint;
     li.title = s.FileName;
     li.className = s.FileName === selectedScenePath ? 'active' : '';
     li.onclick = () => {
@@ -3021,6 +3164,7 @@ function refreshScenesTab() {
   if ($('scene-ble-enabled')) $('scene-ble-enabled').checked = !!scene?.BleEnabled;
   if ($('scene-bind-key')) $('scene-bind-key').value = entry?.BindToKey || '';
   if ($('scene-press-type')) $('scene-press-type').value = entry?.PressType || 'Press';
+  populateSceneTabSelect($('scene-bind-tab'), selectedScenePath, entry?.TabIndex ?? 0);
   renderDeviceTabList(scene);
   renderCommandSequences(scene);
 }
@@ -3064,19 +3208,27 @@ function saveSceneRegistryFields() {
   const hit = reg.Scenes?.find((s) => s.FileName === selectedScenePath);
   if (!hit) return;
   const bind = $('scene-bind-key')?.value || '';
+  const pressType = $('scene-press-type')?.value || 'Press';
+  const tabIndex = parseInt($('scene-bind-tab')?.value, 10) || 0;
   if (bind) {
+    clearSceneBindingsForKey(bind, pressType, hit.FileName);
     hit.BindToKey = bind;
-    hit.PressType = $('scene-press-type')?.value || 'Press';
+    hit.PressType = pressType;
+    if (tabIndex > 0) hit.TabIndex = tabIndex;
+    else delete hit.TabIndex;
   } else {
     delete hit.BindToKey;
     delete hit.PressType;
+    delete hit.TabIndex;
   }
   setSceneRegistry(reg);
   refreshScenesTab();
+  refreshRemoteTab();
 }
 
 $('scene-bind-key')?.addEventListener('change', saveSceneRegistryFields);
 $('scene-press-type')?.addEventListener('change', saveSceneRegistryFields);
+$('scene-bind-tab')?.addEventListener('change', saveSceneRegistryFields);
 
 $('btn-new-scene').onclick = () => {
   const name = prompt('Scene name (shown in remote scene picker):', 'Watch TV');
@@ -3216,12 +3368,12 @@ function renderRemoteKeymap() {
   face.classList.toggle('pcb-stock', !is3661);
 
   const makeBtn = (keyId, label, shape, extra = '') => {
-    const mapped = getKeyMappingValue(keyId);
+    const mapped = keyHasAnyMapping(keyId);
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'remote-key' + (shape ? ' ' + shape : '') + (mapped ? ' mapped' : '') +
       (selection.kind === 'key' && selection.keyName === keyId ? ' selected' : '') + extra;
-    btn.innerHTML = `<span class="rk-lbl">${label}</span><span class="rk-map">${describeKeyMapping(mapped, selectedPagePath) || '—'}</span>`;
+    btn.innerHTML = `<span class="rk-lbl">${label}</span><span class="rk-map">${describePhysicalKeyMapping(keyId) || '—'}</span>`;
     btn.onclick = () => selectKey(keyId, label);
     return btn;
   };
@@ -3612,6 +3764,7 @@ function updateSelectionPanel(friendlyLabel) {
     $('selection-title').textContent = 'Physical key';
     $('selection-sub').textContent = friendlyLabel || KEY_LABELS[selection.keyName] || selection.keyName;
     const pressType = $('key-press-type')?.value || 'Press';
+    const sceneHit = findSceneBindingForKey(selection.keyName, pressType);
     const mapped = getKeyMappingValue(selection.keyName, pressType);
     const cf = ensurePageCommandFile();
     const defaultCmd = DEFAULT_CMD_FOR_KEY[selection.keyName] || selection.keyName.toUpperCase();
@@ -3619,8 +3772,15 @@ function updateSelectionPanel(friendlyLabel) {
     if ($('action-ble-cmd-name')) {
       $('action-ble-cmd-name').value = defaultCmd;
     }
-    if (mapped && typeof mapped === 'object') {
-      if (mapped.Action === 'Widget' || mapped.WidgetIndex != null) {
+    if (sceneHit) {
+      $('action-type').value = 'launch_scene';
+      populateKeyScenePick(sceneHit.FileName);
+      populateKeySceneTabPick(sceneHit.FileName, sceneHit.TabIndex ?? 0);
+    } else if (mapped && typeof mapped === 'object') {
+      if (mapped.Action === 'Tab' || (mapped.TabIndex != null && !mapped.SceneFile && mapped.Action !== 'Scene')) {
+        $('action-type').value = 'switch_scene_tab';
+        populateKeyTabPick(mapped.TabIndex ?? 0);
+      } else if (mapped.Action === 'Widget' || mapped.WidgetIndex != null) {
         $('action-type').value = 'ui_widget';
         populateKeyWidgetPick(mapped.WidgetIndex);
       } else if (mapped.Action === 'HA' || mapped.EntityId) {
@@ -3689,8 +3849,25 @@ function syncActionPanels() {
   $('panel-ir-existing')?.classList.toggle('hidden', t !== 'ir_existing');
   $('panel-ui-widget')?.classList.toggle('hidden', t !== 'ui_widget');
   $('panel-key-ha')?.classList.toggle('hidden', t !== 'ha');
-  $('panel-key-advanced')?.classList.toggle('hidden', selection.kind !== 'key');
+  $('panel-launch-scene')?.classList.toggle('hidden', t !== 'launch_scene');
+  $('panel-scene-tab')?.classList.toggle('hidden', t !== 'switch_scene_tab');
+  $('panel-key-press-type')?.classList.toggle('hidden', selection.kind !== 'key');
+  const pressSel = $('key-press-type');
+  if (pressSel) {
+    [...pressSel.options].forEach((o) => {
+      const dis = t === 'launch_scene' && (o.value === 'Release' || o.value === 'Repeat');
+      o.hidden = dis;
+      o.disabled = dis;
+    });
+    if (t === 'launch_scene' && (pressSel.value === 'Release' || pressSel.value === 'Repeat')) {
+      pressSel.value = 'Press';
+    }
+  }
   if (t === 'ui_widget') populateKeyWidgetPick();
+  if (t === 'launch_scene') {
+    populateKeyScenePick($('key-scene-pick')?.value || '');
+  }
+  if (t === 'switch_scene_tab') populateKeyTabPick(parseInt($('key-tab-pick')?.value, 10) || 0);
   if (t === 'ha') {
     renderKeyHaDomainTabs();
     populateKeyHaEntityPicker().catch(() => {});
@@ -3700,6 +3877,9 @@ function syncActionPanels() {
 $('action-type')?.addEventListener('change', syncActionPanels);
 $('key-press-type')?.addEventListener('change', () => {
   if (selection.kind === 'key') updateSelectionPanel(KEY_LABELS[selection.keyName] || selection.keyName);
+});
+$('key-scene-pick')?.addEventListener('change', () => {
+  populateKeySceneTabPick($('key-scene-pick')?.value || '', 0);
 });
 $('widget-action-type')?.addEventListener('change', () => {
   $('widget-panel-ir')?.classList.toggle('hidden', $('widget-action-type').value !== 'ir');
@@ -3782,6 +3962,27 @@ $('btn-key-apply').onclick = () => {
   const page = currentPage();
   page.ButtonMaps = page.ButtonMaps || {};
   const pt = $('key-press-type').value;
+  if (t === 'launch_scene') {
+    const sceneFile = $('key-scene-pick')?.value;
+    if (!sceneFile) return;
+    const tabIndex = parseInt($('key-scene-tab-pick')?.value, 10) || 0;
+    clearPhysicalKeyPageMapping(selection.keyName, pt);
+    assignSceneToPhysicalKey(sceneFile, selection.keyName, pt, tabIndex);
+    refreshRemoteTab();
+    refreshScenesTab();
+    return;
+  }
+  if (t === 'switch_scene_tab') {
+    const tabIndex = parseInt($('key-tab-pick')?.value, 10);
+    if (Number.isNaN(tabIndex)) return;
+    clearSceneBindingsForKey(selection.keyName, pt);
+    page.ButtonMaps[selection.keyName] = page.ButtonMaps[selection.keyName] || {};
+    page.ButtonMaps[selection.keyName][pt] = { Action: 'Tab', TabIndex: tabIndex };
+    savePage(page);
+    refreshRemoteTab();
+    return;
+  }
+  clearSceneBindingsForKey(selection.keyName, pt);
   let mapping = null;
   if (t === 'ir_existing') {
     mapping = $('action-cmd-pick').value;
@@ -3828,18 +4029,21 @@ $('btn-key-apply').onclick = () => {
     }
   }
   savePage(page);
+  ensureOverrideKeyForActivePage(selection.keyName);
   refreshRemoteTab();
 };
 
 $('btn-key-clear').onclick = () => {
-  const page = currentPage();
   const pt = $('key-press-type').value;
+  clearSceneBindingsForKey(selection.keyName, pt);
+  const page = currentPage();
   if (page.ButtonMaps?.[selection.keyName]?.[pt]) {
     delete page.ButtonMaps[selection.keyName][pt];
     if (!Object.keys(page.ButtonMaps[selection.keyName]).length) delete page.ButtonMaps[selection.keyName];
+    savePage(page);
   }
-  savePage(page);
   refreshRemoteTab();
+  refreshScenesTab();
 };
 
 $('btn-delete-widget').onclick = () => {

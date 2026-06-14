@@ -147,6 +147,7 @@ static constexpr size_t kManifestChunkHdr = 3;
 uint8_t sCurrentFileRetries = 0;
 bool sDeferredConfigChanged = false;
 uint32_t sDeferredConfigChangedMs = 0;
+bool sForceFullConfigPull = false;
 uint32_t sSuppressConfigPullUntilMs = 0;
 std::vector<std::string> sPushQueue;
 size_t sPushNextIdx = 0;
@@ -469,17 +470,36 @@ bool writeCurrentFile() {
 
 
 
-  File f = LittleFS.open(fsPath.c_str(), "w");
-
-  if (!f) {
-
-    Serial.printf("[bridge_client] write failed %s\n", fsPath.c_str());
-
-    return false;
-
+  const size_t toWrite = sCurrentFileBuf.size();
+  const uint32_t incomingHash = fnv1aHash(sCurrentFileBuf.data(), toWrite);
+  File existing = LittleFS.open(fsPath.c_str(), "r");
+  if (existing && existing.size() == toWrite) {
+    std::vector<uint8_t> prior(toWrite);
+    size_t got = 0;
+    while (got < toWrite) {
+      const int n = existing.read(prior.data() + got, toWrite - got);
+      if (n <= 0)
+        break;
+      got += static_cast<size_t>(n);
+    }
+    existing.close();
+    if (got == toWrite && fnv1aHash(prior.data(), toWrite) == incomingHash) {
+      Serial.printf("[bridge_client] unchanged %s (%u bytes hash=%08x)\n", fsPath.c_str(),
+                    static_cast<unsigned>(toWrite), incomingHash);
+      sCurrentFileBuf.clear();
+      sCurrentFileBuf.shrink_to_fit();
+      return true;
+    }
+  } else if (existing) {
+    existing.close();
   }
 
-  const size_t toWrite = sCurrentFileBuf.size();
+  File f = LittleFS.open(fsPath.c_str(), "w");
+  if (!f) {
+    Serial.printf("[bridge_client] write failed %s\n", fsPath.c_str());
+    return false;
+  }
+
   const size_t written = f.write(sCurrentFileBuf.data(), toWrite);
   f.close();
   if (written != toWrite) {
@@ -689,7 +709,10 @@ void parseManifestBody(const char *data, size_t len) {
   if (sPhase == SyncPhase::PushFile)
     return;
 
-  if (!manifestChanged && missing.empty()) {
+  const bool forcePull = sForceFullConfigPull;
+  sForceFullConfigPull = false;
+
+  if (!forcePull && !manifestChanged && missing.empty()) {
     saveSyncFingerprint();
     sConfigSynced = true;
     sPhase = SyncPhase::Idle;
@@ -700,7 +723,11 @@ void parseManifestBody(const char *data, size_t len) {
 
   saveSyncFingerprint();
 
-  if (!manifestChanged && !missing.empty()) {
+  if (forcePull && !manifestChanged) {
+    sNextFileIdx = 0;
+    Serial.printf("[bridge_client] pulling all %u file(s) (bridge config changed)\n",
+                  static_cast<unsigned>(sManifestFiles.size()));
+  } else if (!manifestChanged && !missing.empty()) {
     sManifestFiles = std::move(missing);
     sNextFileIdx = 0;
     Serial.printf("[bridge_client] pulling %u missing file(s)\n", static_cast<unsigned>(sManifestFiles.size()));
@@ -1015,6 +1042,7 @@ void tick() {
       sDeferredConfigChangedMs = now + 3000;
     } else {
       sDeferredConfigChanged = false;
+      sForceFullConfigPull = true;
       beginResync("bridge config changed");
     }
   }
@@ -1312,10 +1340,14 @@ void requestConfigPull() {
     Serial.println("[bridge_client] config pull skipped — bridge not linked");
     return;
   }
+  sForceFullConfigPull = true;
   beginResync("manual pull");
 }
 
-void requestQueuedResync() { beginResync("queued update"); }
+void requestQueuedResync() {
+  sForceFullConfigPull = true;
+  beginResync("queued update");
+}
 
 void requestPushToBridge() {
   if (omote_link::state() != omote_link::LinkState::Linked) {

@@ -27,6 +27,7 @@ using KeyPressTypes = KeyPressAbstract::KeyEvent::Type;
 struct ScreensStruct {
   KeyPressTypes pressType = KeyPressTypes::INVALID;
   std::string ScreenFileName;
+  uint16_t tabIndex = 0;
 };
 
 class JsonHomeScreen : public Base {
@@ -40,7 +41,10 @@ public:
 
   bool GoToPage(ID anId) { return false; }; // return mTabView->GoToTab(anId); }
 
-  void displayScenePage(const std::string &aFileName, bool restoreScene, bool showScene = true);
+  void displayScenePage(const std::string &aFileName, bool restoreScene, bool showScene = true, uint16_t openAtTab = 0);
+
+  void openSceneAtTab(const std::string &aFileName, uint16_t tabIndex);
+  void switchToTabIndex(uint16_t tabIndex);
 
   /** Re-read page JSON from LittleFS for the current scene (after editor deploy). */
   void reloadCurrentSceneFromDisk();
@@ -97,6 +101,9 @@ protected:
 
   /** Rebuild scene picker and key bindings from Scenes.json. */
   void populateSceneListFromDisk();
+
+  bool hasOverrideKey(KeyIds id, KeyPressTypes type) const;
+  bool hasPageKeyHandler(KeyIds id, KeyPressTypes type) const;
 
 private:
   DeviceFactory &mFactory;

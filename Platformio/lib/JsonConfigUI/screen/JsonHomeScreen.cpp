@@ -4,6 +4,7 @@
 #include "AddDevice.hpp"
 #include "HaRuntime.hpp"
 #include "HardwareFactory.hpp"
+#include "SceneKeyDispatch.hpp"
 #include "UiOverlayGate.hpp"
 #include "JsonPage.hpp"
 #include "RapidJsonUtilty.hpp"
@@ -90,6 +91,16 @@ JsonHomeScreen::JsonHomeScreen(DeviceFactory &aFactory)
   UiOverlayGate::setPrepareHandler(prepareHomeOverlayRam);
   std::fprintf(stderr, "[JsonHomeScreen] HaRuntime init done\n");
   std::fflush(stderr);
+
+  SceneKeyDispatch::registerHandlers(
+      [](const std::string &file, uint16_t tab) {
+        if (sOverlayHome)
+          sOverlayHome->openSceneAtTab(file, tab);
+      },
+      [](uint16_t tab) {
+        if (sOverlayHome)
+          sOverlayHome->switchToTabIndex(tab);
+      });
 
   mSceneChangeHandler.SetNotification(mStatusBar->GetSceneChangeNotification());
   mSceneChangeHandler = [this](std::string aNewScene) { GoToSceneSelection(aNewScene); };
@@ -212,7 +223,18 @@ void JsonHomeScreen::unregisterTabOverrides(uint16_t tabIdx) {
   for (const auto &cached : spec.cachedOverrideHandlers) {
     auto range = mOverrideKeyHandlers.equal_range(cached.first);
     for (auto it = range.first; it != range.second; ++it) {
-      if (it->second.pressType == cached.second.pressType && it->second.command.mode == cached.second.command.mode &&
+      if (it->second.pressType != cached.second.pressType || it->second.kind != cached.second.kind)
+        continue;
+      if (it->second.kind == Command::KeyActionKind::Command) {
+        if (it->second.commandLookupFile == cached.second.commandLookupFile &&
+            it->second.commandLookupPrefix == cached.second.commandLookupPrefix &&
+            it->second.commandLookupName == cached.second.commandLookupName) {
+          mOverrideKeyHandlers.erase(it);
+          break;
+        }
+        continue;
+      }
+      if (it->second.command.mode == cached.second.command.mode &&
           it->second.command.protocol == cached.second.command.protocol &&
           it->second.command.data == cached.second.command.data) {
         mOverrideKeyHandlers.erase(it);
@@ -245,6 +267,7 @@ void JsonHomeScreen::ensureTabLoaded(uint16_t tabIdx) {
 #ifndef IS_SIMULATOR
   Serial.printf("[Scene] load tab %u heap=%u\n", static_cast<unsigned>(tabIdx), ESP.getFreeHeap());
 #endif
+  Command::Commands::releaseCachedDocuments();
   auto page = buildTabPage(mSceneTabSpecs[tabIdx]);
   auto *jsonPage = static_cast<Page::JsonPage *>(page.get());
   if (!jsonPage->isLoaded()) {
@@ -424,7 +447,31 @@ bool isSceneListedInManifest(const std::string &fileName) {
 
 } // namespace
 
-void JsonHomeScreen::displayScenePage(const std::string &aFileName, bool restoreScene, bool showScene) {
+void JsonHomeScreen::switchToTabIndex(uint16_t tabIndex) {
+  if (!mTabView || !mTabView->IsSetVisible() || tabIndex >= mSceneTabSpecs.size())
+    return;
+  if (mTabView->GetCurrentTabIdx() == tabIndex)
+    return;
+  mTabView->SetCurrentTabIdx(tabIndex, LV_ANIM_OFF);
+  RtcLastState.tabIdx = tabIndex;
+  LvglResourceManager::GetInstance().QueueForLater([this, tabIndex]() {
+    unloadInactiveTabs(tabIndex);
+    ensureTabLoaded(tabIndex);
+  });
+}
+
+void JsonHomeScreen::openSceneAtTab(const std::string &aFileName, uint16_t tabIndex) {
+  if (mLastScene == aFileName && mTabView && mTabView->IsSetVisible()) {
+    switchToTabIndex(tabIndex);
+    mTabView->SetVisiblity(true);
+    mList->SetVisiblity(false);
+    lv_obj_fade_in(mTabView->LvglSelf(), 400, 0);
+    return;
+  }
+  displayScenePage(aFileName, false, true, tabIndex);
+}
+
+void JsonHomeScreen::displayScenePage(const std::string &aFileName, bool restoreScene, bool showScene, uint16_t openAtTab) {
 #if OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
   if (!bridge_client::configSynced()) {
     Serial.printf("[Scene] blocked %s — bridge config not synced yet\n", aFileName.c_str());
@@ -458,7 +505,8 @@ void JsonHomeScreen::displayScenePage(const std::string &aFileName, bool restore
 #ifndef IS_SIMULATOR
     ble_scene::armSceneBle(bleEnabled);
 #endif
-    return; // no scene change, just bring existing tabview back up
+    switchToTabIndex(openAtTab);
+    return;
   }
 
   const bool newSceneHasEntryExit =
@@ -549,7 +597,7 @@ void JsonHomeScreen::displayScenePage(const std::string &aFileName, bool restore
   SceneFinishParams finish;
   finish.fileName = aFileName;
   finish.restoreScene = restoreScene;
-  finish.tabIdx = restoreScene ? RtcLastState.tabIdx : 0;
+  finish.tabIdx = restoreScene ? RtcLastState.tabIdx : openAtTab;
   finish.showScene = showScene;
   finish.bleEnabled = bleEnabled;
   LvglResourceManager::GetInstance().QueueForLater([this, tabSpecs = std::move(tabSpecs),
@@ -567,12 +615,34 @@ void JsonHomeScreen::SetBgColor(lv_color_t value, lv_part_t selector) {
   UI::UIElement::SetBgColor(value, selector);
 }
 
+bool JsonHomeScreen::hasOverrideKey(KeyIds id, KeyPressTypes type) const {
+  const auto range = mOverrideKeyHandlers.equal_range(id);
+  for (auto it = range.first; it != range.second; ++it) {
+    if (it->second.pressType == type)
+      return true;
+  }
+  return false;
+}
+
+bool JsonHomeScreen::hasPageKeyHandler(KeyIds id, KeyPressTypes type) const {
+  if (!mTabView || mLastScene.empty())
+    return false;
+  const uint16_t idx = mTabView->GetCurrentTabIdx();
+  if (!mTabView->HasTabContent(idx))
+    return false;
+  const Page::Tab *tab = mTabView->GetCurrentTab();
+  if (!tab || !tab->HasContent())
+    return false;
+  Page::Base *content = tab->GetContent();
+  if (!content || content->GetID() != ID(ID::Pages::JsonPage))
+    return false;
+  const auto *page = static_cast<const Page::JsonPage *>(content);
+  return page->hasKeyHandler(id, type);
+}
+
 bool JsonHomeScreen::OnKeyEvent(KeyPressAbstract::KeyEvent aKeyEvent) {
-  // handle exit sequence first
   if ((aKeyEvent.mId == KeyPressAbstract::KeyId::Power)) {
-    if (aKeyEvent.mType == Command::KeyPressTypes::Press) {
-      return true; // prevent page from responding to press event
-    } else if (aKeyEvent.mType == Command::KeyPressTypes::Long) {
+    if (aKeyEvent.mType == Command::KeyPressTypes::Long) {
       // long press - send exit sequence and return to home screen
       sendExitSequence();
       clearScene();
@@ -583,13 +653,37 @@ bool JsonHomeScreen::OnKeyEvent(KeyPressAbstract::KeyEvent aKeyEvent) {
       mStatusBar->SetTopButtonLabel("Select Scene");
       GoToSceneSelection("");
       return true;
-    } else if (aKeyEvent.mType == Command::KeyPressTypes::Short) {
-      // return to home screen without sending sequence or cancelling last scene
-      GoToSceneSelection("");
-      return true;
+    }
+    if (aKeyEvent.mType == Command::KeyPressTypes::Short) {
+      if (hasOverrideKey(KeyIds::Power, KeyPressTypes::Short)) {
+        // fall through — page/override Short binding (e.g. BLE)
+      } else if (hasOverrideKey(KeyIds::Power, KeyPressTypes::Press) ||
+                 hasPageKeyHandler(KeyIds::Power, KeyPressTypes::Press)) {
+        // quick tap already fired Press mapping; don't also jump to scene picker
+        return true;
+      } else {
+        // return to home screen without sending sequence or cancelling last scene
+        GoToSceneSelection("");
+        return true;
+      }
+    }
+    // Press / Release / Repeat: fall through to OverrideKeys and page ButtonMaps
+  }
+
+  // Scene OverrideKeys (work on every tab) — keep active during bridge config pull.
+  {
+    auto range = mOverrideKeyHandlers.equal_range(aKeyEvent.mId);
+    if (range.first != mOverrideKeyHandlers.end()) {
+      for (auto i = range.first; i != range.second; ++i) {
+        if (i->second.pressType == aKeyEvent.mType) {
+          Command::Commands::executeKey(i->second);
+          return true;
+        }
+      }
     }
   }
-  // scene slection keys first
+
+  // Scene picker launch keys need a complete config manifest first.
 #if OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
   if (!bridge_client::configSynced())
     return false;
@@ -599,22 +693,10 @@ bool JsonHomeScreen::OnKeyEvent(KeyPressAbstract::KeyEvent aKeyEvent) {
     if (range.first != mSceneKeyHandlers.end()) {
       for (auto i = range.first; i != range.second; ++i) {
         if (i->second.pressType == aKeyEvent.mType) {
-          LvglResourceManager::GetInstance().QueueForLater([this, file = i->second.ScreenFileName]() {
-            displayScenePage(file, false);
+          const uint16_t tabIdx = i->second.tabIndex;
+          LvglResourceManager::GetInstance().QueueForLater([this, file = i->second.ScreenFileName, tabIdx]() {
+            openSceneAtTab(file, tabIdx);
           });
-          return true;
-        }
-      }
-    }
-  }
-
-  // then override key handlers
-  {
-    auto range = mOverrideKeyHandlers.equal_range(aKeyEvent.mId);
-    if (range.first != mOverrideKeyHandlers.end()) {
-      for (auto i = range.first; i != range.second; ++i) {
-        if (i->second.pressType == aKeyEvent.mType) {
-          Command::Commands::executeKey(i->second);
           return true;
         }
       }
@@ -652,8 +734,17 @@ void JsonHomeScreen::populateSceneListFromDisk() {
         (*registryEntry)["PressType"].IsString()) {
       const auto id = magic_enum::enum_cast<KeyIds>((*registryEntry)["BindToKey"].GetString());
       const auto type = magic_enum::enum_cast<KeyPressTypes>((*registryEntry)["PressType"].GetString());
-      if (id.has_value() && type.has_value())
-        mSceneKeyHandlers.insert({id.value(), {type.value(), fileName}});
+      if (id.has_value() && type.has_value()) {
+        uint16_t tabIndex = 0;
+        if (jsonHasObjectMember(*registryEntry, "TabIndex")) {
+          const auto &tabVal = (*registryEntry)["TabIndex"];
+          if (tabVal.IsUint())
+            tabIndex = static_cast<uint16_t>(tabVal.GetUint());
+          else if (tabVal.IsInt() && tabVal.GetInt() >= 0)
+            tabIndex = static_cast<uint16_t>(tabVal.GetInt());
+        }
+        mSceneKeyHandlers.insert({id.value(), {type.value(), fileName, tabIndex}});
+      }
     }
   };
 
@@ -828,20 +919,23 @@ void JsonHomeScreen::onBridgeConfigSynced(const std::vector<std::string> &manife
 
   RtcLastState.signature = 0;
   Command::Commands::releaseCachedDocuments();
+  populateSceneListFromDisk();
 
-  if (!mLastScene.empty()) {
-    sendExitSequence();
-    clearScene();
-    mLastScene.clear();
-    mLastStartSeq.clear();
+  const std::string activeScene = mLastScene;
+  if (!activeScene.empty()) {
+    Serial.printf("[JsonHomeScreen] bridge config synced — reloading %s\n", activeScene.c_str());
+    reloadCurrentSceneFromDisk();
+    return;
   }
 
-  populateSceneListFromDisk();
   mTabView->SetVisiblity(false);
   mList->SetVisiblity(true);
   lv_obj_fade_in(mList->LvglSelf(), 400, 0);
   mStatusBar->SetTopButtonLabel("Select Scene");
   HardwareFactory::getAbstract().setInScene(false);
+#ifndef IS_SIMULATOR
+  ble_scene::disarmSceneBle();
+#endif
 
   unsigned sceneCount = 0;
   for (const auto &fileName : sBridgeManifestCache) {
@@ -861,6 +955,8 @@ void JsonHomeScreen::onBridgeConfigSynced(const std::vector<std::string> &manife
   }
   if (!shown)
     Serial.println("[JsonHomeScreen] picker empty — check bridge Scenes/ and ESP-NOW sync");
+  else
+    Serial.println("[JsonHomeScreen] launch a scene for page key maps / BLE (picker keys do not forward)");
 }
 
 #if OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)

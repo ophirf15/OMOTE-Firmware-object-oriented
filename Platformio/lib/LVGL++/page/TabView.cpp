@@ -157,3 +157,8 @@ UI::Page::Tab *TabView::GetCurrentTab() {
   auto idx = GetCurrentTabIdx();
   return idx < mTabs.size() ? mTabs[idx].get() : nullptr;
 }
+
+const UI::Page::Tab *TabView::GetCurrentTab() const {
+  const auto idx = lv_tabview_get_tab_act(LvglSelf());
+  return idx < mTabs.size() ? mTabs[idx].get() : nullptr;
+}

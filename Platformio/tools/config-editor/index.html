@@ -121,20 +121,12 @@ python -m http.server 8080</pre>
             <label class="field-inline"><input type="checkbox" id="scene-ble-enabled" /> Enable Bluetooth in this scene</label>
             <p class="muted small">When on, BLE HID runs while this scene is active. Turned off in scene picker and during editor sync.</p>
             <p class="muted small">Shown at the top of the screen while this scene is active.</p>
-            <details class="advanced-field hidden" id="scene-key-shortcut">
+            <details id="scene-key-shortcut">
               <summary>Physical key shortcut (optional)</summary>
-              <p class="muted small">Jump to this scene when a labeled key is pressed on the remote.</p>
+              <p class="muted small">Jump to this scene when a key is pressed on the remote (any key — not only device-labeled keys).</p>
               <label>Key
                 <select id="scene-bind-key">
                   <option value="">None</option>
-                  <option value="TV">TV</option>
-                  <option value="Stream">Stream</option>
-                  <option value="BluRay">BluRay</option>
-                  <option value="Audio">Audio</option>
-                  <option value="Aux1">Aux1 (Red)</option>
-                  <option value="Aux2">Aux2 (Green)</option>
-                  <option value="Aux3">Aux3 (Yellow)</option>
-                  <option value="Aux4">Aux4 (Blue)</option>
                 </select>
               </label>
               <label>Press type
@@ -142,6 +134,11 @@ python -m http.server 8080</pre>
                   <option value="Press">Press</option>
                   <option value="Long">Long</option>
                   <option value="Short">Short</option>
+                </select>
+              </label>
+              <label>Open device tab
+                <select id="scene-bind-tab">
+                  <option value="0">First tab</option>
                 </select>
               </label>
             </details>
@@ -246,6 +243,8 @@ python -m http.server 8080</pre>
                   <option value="ir_existing">Use existing command from this device</option>
                   <option value="ui_widget">Trigger screen widget action</option>
                   <option value="ha">Home Assistant action</option>
+                  <option value="launch_scene">Launch scene</option>
+                  <option value="switch_scene_tab">Switch device tab (this scene)</option>
                 </select>
               </label>
               <div id="panel-ir">
@@ -284,7 +283,22 @@ python -m http.server 8080</pre>
                   </select>
                 </label>
               </div>
-              <div id="panel-key-advanced" class="advanced-field hidden">
+              <div id="panel-launch-scene" class="hidden">
+                <label>Scene
+                  <select id="key-scene-pick"></select>
+                </label>
+                <label>Device tab
+                  <select id="key-scene-tab-pick"></select>
+                </label>
+                <p class="muted small">Opens that scene at the chosen bottom tab. Saved in <code>Scenes.json</code>. Use Press, Long, or Short.</p>
+              </div>
+              <div id="panel-scene-tab" class="hidden">
+                <label>Device tab in current scene
+                  <select id="key-tab-pick"></select>
+                </label>
+                <p class="muted small">Jumps to a bottom tab while this scene is active. Saved in the page file for this device.</p>
+              </div>
+              <div id="panel-key-press-type" class="hidden">
                 <label>Press type <select id="key-press-type">
                   <option>Press</option><option>Release</option><option>Repeat</option><option>Long</option><option>Short</option>
                 </select></label>
@@ -436,6 +450,6 @@ python -m http.server 8080</pre>
   <script src="./jszip.min.js"></script>
   <script src="./settings-form.js?v=5"></script>
   <script src="./ble-key-catalog.js?v=1"></script>
-  <script src="./app.js?v=8"></script>
+  <script src="./app.js?v=11"></script>
 </body>
 </html>

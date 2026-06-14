@@ -143,14 +143,17 @@ bool insertHaKeyHandler(KeyPressTypes pressType, Command::KeyIds id, const rapid
   return true;
 }
 
-bool insertCommandKeyHandler(KeyPressTypes pressType, Command::KeyIds id, const Command::CommandStruct &commandStruct,
+bool insertCommandKeyHandler(KeyPressTypes pressType, Command::KeyIds id, const std::string &commandFile,
+                             const std::string &commandPrefix, const std::string &commandName,
                              std::multimap<Command::KeyIds, Command::KeyStruct> &handlers) {
-  if (commandStruct.mode == Command::NONE)
+  if (commandFile.empty() || commandName.empty())
     return false;
   Command::KeyStruct keyStruct;
   keyStruct.pressType = pressType;
   keyStruct.kind = Command::KeyActionKind::Command;
-  keyStruct.command = commandStruct;
+  keyStruct.commandLookupFile = commandFile;
+  keyStruct.commandLookupPrefix = commandPrefix;
+  keyStruct.commandLookupName = commandName;
   handlers.insert({id, keyStruct});
   return true;
 }
@@ -165,10 +168,7 @@ bool insertWidgetKeyHandler(KeyPressTypes pressType, Command::KeyIds id, const r
   if (type == "Button" || type == "Label") {
     if (!widget.HasMember("Command") || !widget["Command"].IsString() || commandFile.empty())
       return false;
-    Command::CommandStruct commandStruct;
-    if (Command::Commands::getCommand(commandFile, commandPrefix, widget["Command"].GetString(), commandStruct) == Command::NONE)
-      return false;
-    return insertCommandKeyHandler(pressType, id, commandStruct, handlers);
+    return insertCommandKeyHandler(pressType, id, commandFile, commandPrefix, widget["Command"].GetString(), handlers);
   }
 
   if (type == "HaToggle") {
@@ -220,6 +220,52 @@ bool insertWidgetKeyHandler(KeyPressTypes pressType, Command::KeyIds id, const r
   return false;
 }
 
+bool readTabIndexField(const rapidjson::Value &obj, uint16_t &tabIndex) {
+  if (obj.HasMember("TabIndex")) {
+    const auto &v = obj["TabIndex"];
+    if (v.IsUint()) {
+      tabIndex = static_cast<uint16_t>(v.GetUint());
+      return true;
+    }
+    if (v.IsInt() && v.GetInt() >= 0) {
+      tabIndex = static_cast<uint16_t>(v.GetInt());
+      return true;
+    }
+  }
+  return false;
+}
+
+bool insertSceneKeyHandler(KeyPressTypes pressType, Command::KeyIds id, const rapidjson::Value &entry,
+                           std::multimap<Command::KeyIds, Command::KeyStruct> &handlers) {
+  std::string sceneFile;
+  if (entry.HasMember("SceneFile") && entry["SceneFile"].IsString())
+    sceneFile = entry["SceneFile"].GetString();
+  if (sceneFile.empty())
+    return false;
+  uint16_t tabIndex = 0;
+  readTabIndexField(entry, tabIndex);
+  Command::KeyStruct keyStruct;
+  keyStruct.pressType = pressType;
+  keyStruct.kind = Command::KeyActionKind::Scene;
+  keyStruct.scene.sceneFile = sceneFile;
+  keyStruct.scene.tabIndex = tabIndex;
+  handlers.insert({id, keyStruct});
+  return true;
+}
+
+bool insertTabKeyHandler(KeyPressTypes pressType, Command::KeyIds id, const rapidjson::Value &entry,
+                         std::multimap<Command::KeyIds, Command::KeyStruct> &handlers) {
+  uint16_t tabIndex = 0;
+  if (!readTabIndexField(entry, tabIndex))
+    return false;
+  Command::KeyStruct keyStruct;
+  keyStruct.pressType = pressType;
+  keyStruct.kind = Command::KeyActionKind::Tab;
+  keyStruct.scene.tabIndex = tabIndex;
+  handlers.insert({id, keyStruct});
+  return true;
+}
+
 bool insertButtonMapValue(const rapidjson::Value &mapValue, const char *pressField, KeyPressTypes pressType, Command::KeyIds id,
                           const rapidjson::Value *widgets, const std::string &commandFile, const std::string &commandPrefix,
                           std::multimap<Command::KeyIds, Command::KeyStruct> &handlers) {
@@ -227,10 +273,7 @@ bool insertButtonMapValue(const rapidjson::Value &mapValue, const char *pressFie
     return false;
   const rapidjson::Value &entry = mapValue[pressField];
   if (entry.IsString()) {
-    Command::CommandStruct commandStruct;
-    if (Command::Commands::getCommand(commandFile, commandPrefix, entry.GetString(), commandStruct) == Command::NONE)
-      return false;
-    return insertCommandKeyHandler(pressType, id, commandStruct, handlers);
+    return insertCommandKeyHandler(pressType, id, commandFile, commandPrefix, entry.GetString(), handlers);
   }
   if (!entry.IsObject())
     return false;
@@ -255,6 +298,14 @@ bool insertButtonMapValue(const rapidjson::Value &mapValue, const char *pressFie
     if (widgetIndex >= widgets->Size())
       return false;
     return insertWidgetKeyHandler(pressType, id, (*widgets)[widgetIndex], commandFile, commandPrefix, handlers);
+  }
+
+  if (action == "Tab" || (action.empty() && entry.HasMember("TabIndex") && !entry.HasMember("SceneFile"))) {
+    return insertTabKeyHandler(pressType, id, entry, handlers);
+  }
+
+  if (action == "Scene" || entry.HasMember("SceneFile")) {
+    return insertSceneKeyHandler(pressType, id, entry, handlers);
   }
 
   return false;
@@ -319,6 +370,25 @@ JsonPage::JsonPage(std::string aFileName, std::string aPageName, std::string aCo
     mCommandFile = d["CommandFile"].GetString();
   }
 
+  if (d.HasMember("ButtonMaps") && d["ButtonMaps"].IsObject()) {
+    const rapidjson::Value *widgets = d.HasMember("Widgets") && d["Widgets"].IsArray() ? &d["Widgets"] : nullptr;
+    for (Command::KeyIds id = Command::KeyIds::Power; id != Command::KeyIds::INVALID; id = (Command::KeyIds)((int)id + 1)) {
+      auto key = magic_enum::enum_name(id);
+      if (!key.data() || !key.data()[0])
+        continue;
+      if (!d["ButtonMaps"].HasMember(key.data()))
+        continue;
+      const rapidjson::Value &keyMap = d["ButtonMaps"][key.data()];
+      if (!keyMap.IsObject())
+        continue;
+      insertButtonMapValue(keyMap, "Press", Command::KeyPressTypes::Press, id, widgets, mCommandFile, aCommandPrefix, mKeyHandlers);
+      insertButtonMapValue(keyMap, "Release", Command::KeyPressTypes::Release, id, widgets, mCommandFile, aCommandPrefix, mKeyHandlers);
+      insertButtonMapValue(keyMap, "Repeat", Command::KeyPressTypes::Repeat, id, widgets, mCommandFile, aCommandPrefix, mKeyHandlers);
+      insertButtonMapValue(keyMap, "Long", Command::KeyPressTypes::Long, id, widgets, mCommandFile, aCommandPrefix, mKeyHandlers);
+      insertButtonMapValue(keyMap, "Short", Command::KeyPressTypes::Short, id, widgets, mCommandFile, aCommandPrefix, mKeyHandlers);
+    }
+  }
+
   bool pageNeedsScroll = false;
   if (d.HasMember("Widgets") && d["Widgets"].IsArray()) {
     for (rapidjson::SizeType i = 0; i < d["Widgets"].Size(); i++) {
@@ -365,25 +435,6 @@ JsonPage::JsonPage(std::string aFileName, std::string aPageName, std::string aCo
   }
   Serial.printf("JsonPage %s: %u widgets (%u HA)\n", aFileName.c_str(), static_cast<unsigned>(mWidgets.size()),
                 static_cast<unsigned>(mHaBindings.size()));
-
-  if (d.HasMember("ButtonMaps") && d["ButtonMaps"].IsObject()) {
-    const rapidjson::Value *widgets = d.HasMember("Widgets") && d["Widgets"].IsArray() ? &d["Widgets"] : nullptr;
-    for (Command::KeyIds id = Command::KeyIds::Power; id != Command::KeyIds::INVALID; id = (Command::KeyIds)((int)id + 1)) {
-      auto key = magic_enum::enum_name(id);
-      if (!key.data() || !key.data()[0])
-        continue;
-      if (!d["ButtonMaps"].HasMember(key.data()))
-        continue;
-      const rapidjson::Value &keyMap = d["ButtonMaps"][key.data()];
-      if (!keyMap.IsObject())
-        continue;
-      insertButtonMapValue(keyMap, "Press", Command::KeyPressTypes::Press, id, widgets, mCommandFile, aCommandPrefix, mKeyHandlers);
-      insertButtonMapValue(keyMap, "Release", Command::KeyPressTypes::Release, id, widgets, mCommandFile, aCommandPrefix, mKeyHandlers);
-      insertButtonMapValue(keyMap, "Repeat", Command::KeyPressTypes::Repeat, id, widgets, mCommandFile, aCommandPrefix, mKeyHandlers);
-      insertButtonMapValue(keyMap, "Long", Command::KeyPressTypes::Long, id, widgets, mCommandFile, aCommandPrefix, mKeyHandlers);
-      insertButtonMapValue(keyMap, "Short", Command::KeyPressTypes::Short, id, widgets, mCommandFile, aCommandPrefix, mKeyHandlers);
-    }
-  }
 }
 
 JsonPage::~JsonPage() {
@@ -934,6 +985,15 @@ void JsonPage::getKeyOverrides(const std::vector<std::string> &keyNames,
                                std::multimap<Command::KeyIds, Command::KeyStruct> &aKeyHandlers) {
   for (const auto &name : keyNames)
     collectKeyOverride(name, mKeyHandlers, aKeyHandlers);
+}
+
+bool JsonPage::hasKeyHandler(Command::KeyIds id, Command::KeyPressTypes type) const {
+  const auto range = mKeyHandlers.equal_range(id);
+  for (auto it = range.first; it != range.second; ++it) {
+    if (it->second.pressType == type)
+      return true;
+  }
+  return false;
 }
 
 bool JsonPage::OnKeyEvent(KeyPressAbstract::KeyEvent aKeyEvent) {

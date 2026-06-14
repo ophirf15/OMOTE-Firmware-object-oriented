@@ -35,6 +35,9 @@ public:
   void getKeyOverrides(const std::vector<std::string> &keyNames,
                        std::multimap<Command::KeyIds, Command::KeyStruct> &aKeyHandlers);
 
+  /** True when this page's ButtonMaps bind id+type (e.g. Power Press → BLE). */
+  bool hasKeyHandler(Command::KeyIds id, Command::KeyPressTypes type) const;
+
 private:
   struct HaBinding {
     std::string entityId;
