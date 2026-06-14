@@ -148,7 +148,7 @@ std::string SystemSettings::GetTitle() {
   return "Device settings";
 }
 
-void SystemSettings::patchBool(const char *key, bool value) {
+void SystemSettings::patchBool(const char *key, bool value, bool persistNow) {
   rapidjson::Document patch;
   patch.SetObject();
   auto &a = patch.GetAllocator();
@@ -156,9 +156,11 @@ void SystemSettings::patchBool(const char *key, bool value) {
   device_settings::mergeFromJson(patch);
   device_settings::applyToHardware();
   mSaveReqrd = true;
+  if (persistNow)
+    device_settings::saveToLittleFS();
 }
 
-void SystemSettings::patchInt(const char *key, int32_t value) {
+void SystemSettings::patchInt(const char *key, int32_t value, bool persistNow) {
   rapidjson::Document patch;
   patch.SetObject();
   auto &a = patch.GetAllocator();
@@ -166,9 +168,11 @@ void SystemSettings::patchInt(const char *key, int32_t value) {
   device_settings::mergeFromJson(patch);
   device_settings::applyToHardware();
   mSaveReqrd = true;
+  if (persistNow)
+    device_settings::saveToLittleFS();
 }
 
-void SystemSettings::patchString(const char *key, const std::string &value) {
+void SystemSettings::patchString(const char *key, const std::string &value, bool persistNow) {
   rapidjson::Document patch;
   patch.SetObject();
   auto &a = patch.GetAllocator();
@@ -176,6 +180,8 @@ void SystemSettings::patchString(const char *key, const std::string &value) {
   device_settings::mergeFromJson(patch);
   device_settings::applyToHardware();
   mSaveReqrd = true;
+  if (persistNow)
+    device_settings::saveToLittleFS();
 }
 
 int32_t SystemSettings::readIntField(const char *key, int32_t fallback) const {
@@ -333,7 +339,7 @@ void SystemSettings::buildFromSchema() {
         const int32_t current =
             nearestChoiceValue(readJsonInt(values, key, fallback), field["options"]);
         auto *dd = AddNewElement<Widget::DropDown<int>>(
-            [this, key](int value) { patchInt(key, value); });
+            [this, key](int value) { patchInt(key, value, true); });
         dd->SetHeight(kControlH);
         const auto &options = field["options"];
         for (rapidjson::SizeType oi = 0; oi < options.Size(); ++oi) {

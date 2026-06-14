@@ -151,6 +151,7 @@ bool isHighPriorityTx(uint8_t type) {
   case MsgType::HaState:
   case MsgType::HaStateAttrs:
   case MsgType::RemotePower:
+  case MsgType::RemoteBattery:
     return true;
   default:
     return false;

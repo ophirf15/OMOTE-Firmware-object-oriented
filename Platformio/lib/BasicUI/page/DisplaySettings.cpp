@@ -2,6 +2,7 @@
 #include "HardwareFactory.hpp"
 #include "Label.hpp"
 #include "Slider.hpp"
+#include "device_settings.hpp"
 
 using namespace UI::Page;
 
@@ -80,6 +81,8 @@ DisplaySettings::DisplaySettings(std::shared_ptr<DisplayAbstract> aDisplay)
 
 DisplaySettings::~DisplaySettings() {
   if (mSaveRequired) {
+    device_settings::syncFromHardware();
+    device_settings::saveToLittleFS();
     HardwareFactory::getAbstract().saveSettings();
   }
 }

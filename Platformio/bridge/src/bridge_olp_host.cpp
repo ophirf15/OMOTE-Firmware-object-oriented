@@ -22,6 +22,8 @@
 
 #include <vector>
 
+#include "rapidjson/document.h"
+
 
 
 #ifndef FS_PATH
@@ -68,6 +70,8 @@ ActiveFileSend sActiveFileSend;
 struct ActiveFileReceive {
   bool active = false;
   String relPath;
+  String finalPath;
+  String tempPath;
   File file;
   size_t offset = 0;
   size_t total = 0;
@@ -571,6 +575,66 @@ void pumpFileSend() {
   }
 }
 
+bool validatePushedJson(const String &relPath, const char *data, size_t len) {
+  if (!data || !len)
+    return false;
+  rapidjson::Document doc;
+  doc.Parse(data, len);
+  if (doc.HasParseError())
+    return false;
+  if (relPath == "DeviceSettings.schema.json")
+    return doc.IsObject() && doc.HasMember("sections") && doc["sections"].IsArray();
+  return doc.IsObject() || doc.IsArray();
+}
+
+bool commitPushedFile(const String &relPath, const String &finalPath, const String &tempPath,
+                      size_t total) {
+  File tmp = LittleFS.open(tempPath, "r");
+  if (!tmp) {
+    Serial.printf("[bridge_olp] push commit open failed %s\n", tempPath.c_str());
+    LittleFS.remove(tempPath);
+    return false;
+  }
+  const size_t got = tmp.size();
+  if (got != total) {
+    Serial.printf("[bridge_olp] push size mismatch %s (%u/%u)\n", relPath.c_str(),
+                  static_cast<unsigned>(got), static_cast<unsigned>(total));
+    tmp.close();
+    LittleFS.remove(tempPath);
+    return false;
+  }
+  const String body = tmp.readString();
+  tmp.close();
+  if (body.length() != total || !validatePushedJson(relPath, body.c_str(), body.length())) {
+    Serial.printf("[bridge_olp] push invalid JSON %s\n", relPath.c_str());
+    LittleFS.remove(tempPath);
+    return false;
+  }
+  if (LittleFS.exists(finalPath))
+    LittleFS.remove(finalPath);
+  if (!LittleFS.rename(tempPath, finalPath)) {
+    File out = LittleFS.open(finalPath, "w");
+    if (!out) {
+      Serial.printf("[bridge_olp] push commit write failed %s\n", finalPath.c_str());
+      LittleFS.remove(tempPath);
+      return false;
+    }
+    out.print(body);
+    out.close();
+    LittleFS.remove(tempPath);
+  }
+  if (relPath == "DeviceSettings.json") {
+    rapidjson::Document doc;
+    doc.Parse(body.c_str());
+    if (!doc.HasParseError() && doc.HasMember("ntp_display_mode") && doc["ntp_display_mode"].IsInt())
+      Serial.printf("[bridge_olp] DeviceSettings ntp_display_mode=%d\n",
+                    doc["ntp_display_mode"].GetInt());
+  }
+  Serial.printf("[bridge_olp] push committed %s (%u bytes)\n", relPath.c_str(),
+                static_cast<unsigned>(total));
+  return true;
+}
+
 void tickConfigNotify() {
   if (!sConfigNotifyPending || millis() < sConfigNotifyAtMs)
     return;
@@ -606,6 +670,32 @@ void onMessage(omote_link::MsgType type, const uint8_t *payload, uint16_t len, c
     }
 
     break;
+
+  case omote_link::MsgType::RemoteBattery: {
+    if (len < sizeof(omote_link::RemoteBatteryPayload))
+      break;
+    omote_link::RemoteBatteryPayload req;
+    memcpy(&req, payload, sizeof(req));
+    static uint8_t sLastCharging = 255;
+    static uint8_t sLastSoc = 255;
+    static uint32_t sLastLogMs = 0;
+    const uint32_t now = millis();
+    const bool charging = req.charging != 0;
+    const bool changed = charging != sLastCharging ||
+                         (req.soc > sLastSoc ? req.soc - sLastSoc : sLastSoc - req.soc) >= 3;
+    if (changed || now - sLastLogMs >= 10000) {
+      sLastCharging = charging;
+      sLastSoc = req.soc;
+      sLastLogMs = now;
+      Serial.printf("[remote_bat] %s soc=%u%% mV=%u pin_highs=%u/%u pin_lows=%u\n",
+                    charging ? "CHARGING" : "on-battery", req.soc, req.voltageMv,
+                    req.chargePinSamples > req.chargePinLows
+                        ? static_cast<unsigned>(req.chargePinSamples - req.chargePinLows)
+                        : 0u,
+                    req.chargePinSamples, req.chargePinLows);
+    }
+    break;
+  }
 
   case omote_link::MsgType::ConfigManifestReq:
 
@@ -724,20 +814,26 @@ void onMessage(omote_link::MsgType type, const uint8_t *payload, uint16_t len, c
       if (!rel.length())
         break;
       const String full = String(FS_PATH) + rel;
+      const String temp = full + ".push";
       const auto slash = full.lastIndexOf('/');
       if (slash > 0) {
         const String dir = full.substring(0, slash);
         if (!LittleFS.exists(dir))
           LittleFS.mkdir(dir);
       }
-      sActiveFileReceive.file = LittleFS.open(full, "w");
+      if (LittleFS.exists(temp))
+        LittleFS.remove(temp);
+      sActiveFileReceive.file = LittleFS.open(temp, "w");
       if (!sActiveFileReceive.file) {
-        Serial.printf("[bridge_olp] push open failed %s\n", full.c_str());
+        Serial.printf("[bridge_olp] push open failed %s\n", temp.c_str());
         break;
       }
       sActiveFileReceive.active = true;
       sActiveFileReceive.relPath = rel;
+      sActiveFileReceive.finalPath = full;
+      sActiveFileReceive.tempPath = temp;
       sActiveFileReceive.total = req.totalSize;
+      sActiveFileReceive.offset = 0;
       Serial.printf("[bridge_olp] push start %s (%u bytes)\n", rel.c_str(),
                     static_cast<unsigned>(req.totalSize));
     }
@@ -766,13 +862,18 @@ void onMessage(omote_link::MsgType type, const uint8_t *payload, uint16_t len, c
     sActiveFileReceive.offset += dataLen;
     if (sActiveFileReceive.offset >= sActiveFileReceive.total && sActiveFileReceive.total > 0) {
       const String pushedPath = sActiveFileReceive.relPath;
+      const String finalPath = sActiveFileReceive.finalPath;
+      const String tempPath = sActiveFileReceive.tempPath;
+      const size_t total = sActiveFileReceive.total;
       sActiveFileReceive.file.close();
-      Serial.printf("[bridge_olp] push done %s (%u bytes)\n", pushedPath.c_str(),
-                    static_cast<unsigned>(sActiveFileReceive.total));
       sActiveFileReceive = {};
-      if (pushedPath == "DeviceSettings.schema.json")
-        bridge_config_schema::ensureOnDisk();
-      notifyConfigChanged();
+      if (commitPushedFile(pushedPath, finalPath, tempPath, total)) {
+        if (pushedPath == "DeviceSettings.schema.json")
+          bridge_config_schema::ensureOnDisk();
+        notifyConfigChanged();
+      } else {
+        Serial.printf("[bridge_olp] push rejected %s\n", pushedPath.c_str());
+      }
     }
 
     break;
@@ -784,7 +885,7 @@ void onMessage(omote_link::MsgType type, const uint8_t *payload, uint16_t len, c
 
   }
 
-  if (type != omote_link::MsgType::RemotePower)
+  if (type != omote_link::MsgType::RemotePower && type != omote_link::MsgType::RemoteBattery)
     bridge_power::noteRemoteActivity();
 
 }

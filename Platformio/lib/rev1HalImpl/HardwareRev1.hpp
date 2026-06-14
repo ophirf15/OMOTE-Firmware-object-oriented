@@ -11,6 +11,8 @@ public:
 
   std::shared_ptr<BatteryInterface> battery() override { return mBattery; };
 
+  bool isUsbConnected() override;
+
   void init() override;
 
 private:

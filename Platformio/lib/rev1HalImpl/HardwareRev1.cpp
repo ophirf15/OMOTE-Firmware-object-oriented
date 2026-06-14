@@ -84,3 +84,9 @@ bool HardwareRev1::keyboardScan() {
   }
   return retVal || matrixActivity;
 }
+
+bool HardwareRev1::isUsbConnected() {
+  if (!mBattery)
+    return false;
+  return mBattery->isPluggedIn() && !mBattery->isChargingLatched();
+}

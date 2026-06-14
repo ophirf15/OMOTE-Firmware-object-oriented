@@ -40,6 +40,12 @@ void requestQueuedResync();
 /** Push all local config files to the bridge (remote backup → bridge). */
 void requestPushToBridge();
 
+/** Push one config file to the bridge after a local save (debounced). */
+void requestPushConfigFile(const std::string &relPath);
+
+/** Wait for any debounced config push to finish (call after saving settings). */
+void flushPendingConfigPush(uint32_t maxWaitMs = 2000);
+
 /** Clear ESP-NOW bridge peer (e.g. after swapping bridge hardware). */
 void forgetBridgeLink();
 
@@ -51,6 +57,9 @@ void notifyRemoteWake();
 
 /** Ask the bridge to poll one HA entity immediately (climate refresh). */
 void requestHaEntityPoll(const std::string &entityId);
+
+/** Send battery telemetry to bridge (logged on bridge serial). */
+void reportRemoteBattery(int soc, bool charging, int voltageMv, int chargePinLows, int chargePinSamples);
 
 /** True if relPath (e.g. Scenes/Scene_Foo.json) was in the last completed bridge sync manifest. */
 bool isSyncedConfigFile(const std::string &relPath);

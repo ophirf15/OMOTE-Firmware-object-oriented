@@ -817,7 +817,9 @@ void JsonHomeScreen::onBridgeConfigSynced(const std::vector<std::string> &manife
       Serial.println("[JsonHomeScreen] device settings schema reloaded");
   }
   if (bridge_client::isSyncedConfigFile("DeviceSettings.json")) {
-    if (device_settings::loadFromLittleFS(true)) {
+    if (device_settings::isDirty()) {
+      Serial.println("[JsonHomeScreen] device settings reload skipped — unsaved edits");
+    } else if (device_settings::loadFromLittleFS(true)) {
       device_settings::applyToHardware();
       Serial.println("[JsonHomeScreen] device settings applied");
     }

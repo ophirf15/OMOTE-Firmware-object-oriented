@@ -42,6 +42,9 @@ const Settings &currentConst();
 
 bool loadFromLittleFS(bool forceReload = false);
 bool saveToLittleFS();
+/** Write RAM settings to disk when mergeFromJson left them dirty (before push / sleep). */
+bool flushDirtyToDisk();
+bool isDirty();
 rapidjson::Document toJsonDocument();
 /** Merge keys from a JSON object; returns false if not an object. */
 bool mergeFromJson(const rapidjson::Value &doc);

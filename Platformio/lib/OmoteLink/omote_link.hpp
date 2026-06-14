@@ -72,6 +72,9 @@ enum class MsgType : uint8_t {
   /** Remote → bridge: awake=1 wake, awake=0 sleep (reduce HA polling / save power). */
   RemotePower = 36,
 
+  /** Remote → bridge: battery/charge telemetry for bridge serial debug. */
+  RemoteBattery = 37,
+
 };
 
 
@@ -191,6 +194,14 @@ struct __attribute__((packed)) HaPollReqPayload {
 
 struct __attribute__((packed)) RemotePowerPayload {
   uint8_t awake;
+};
+
+struct __attribute__((packed)) RemoteBatteryPayload {
+  uint8_t soc;
+  uint8_t charging;
+  uint8_t chargePinLows;
+  uint8_t chargePinSamples;
+  uint16_t voltageMv;
 };
 
 

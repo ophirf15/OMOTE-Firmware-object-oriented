@@ -5,7 +5,12 @@
 #include "HardwareAbstract.hpp"
 #include "RapidJsonUtilty.hpp"
 #ifndef IS_SIMULATOR
+#include <Arduino.h>
+#include <LittleFS.h>
 #include "display.hpp"
+#endif
+#if defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
+#include "bridge_client.hpp"
 #endif
 
 #include <fstream>
@@ -28,6 +33,7 @@ Settings sSettings;
 uint32_t sLastActivityMs = 0;
 bool sScreenPoweredOff = false;
 bool sLoadedFromDisk = false;
+bool sDirty = false;
 
 std::string vfsPath(const char *rel) {
   std::string base = FS_PATH;
@@ -35,6 +41,57 @@ std::string vfsPath(const char *rel) {
     base.pop_back();
   return base + "/" + rel;
 }
+
+#if !defined(IS_SIMULATOR)
+bool writeLittleFsFile(const char *relPath, const std::string &body) {
+  const String finalPath = String(FS_PATH) + relPath;
+  const String tempPath = finalPath + ".tmp";
+  if (LittleFS.exists(tempPath))
+    LittleFS.remove(tempPath);
+  File out = LittleFS.open(tempPath, "w");
+  if (!out) {
+    Serial.printf("[device_settings] open failed %s\n", tempPath.c_str());
+    return false;
+  }
+  const size_t written = out.print(body.c_str());
+  out.close();
+  if (written != body.length()) {
+    Serial.printf("[device_settings] short write %s (%u/%u)\n", relPath,
+                  static_cast<unsigned>(written), static_cast<unsigned>(body.length()));
+    LittleFS.remove(tempPath);
+    return false;
+  }
+  File verify = LittleFS.open(tempPath, "r");
+  if (!verify || verify.size() != body.length()) {
+    Serial.printf("[device_settings] verify failed %s\n", relPath);
+    if (verify)
+      verify.close();
+    LittleFS.remove(tempPath);
+    return false;
+  }
+  verify.close();
+  if (LittleFS.exists(finalPath))
+    LittleFS.remove(finalPath);
+  if (!LittleFS.rename(tempPath, finalPath)) {
+    File src = LittleFS.open(tempPath, "r");
+    File dst = LittleFS.open(finalPath, "w");
+    if (!src || !dst) {
+      if (src)
+        src.close();
+      if (dst)
+        dst.close();
+      LittleFS.remove(tempPath);
+      Serial.printf("[device_settings] commit failed %s\n", relPath);
+      return false;
+    }
+    dst.print(src.readString());
+    src.close();
+    dst.close();
+    LittleFS.remove(tempPath);
+  }
+  return true;
+}
+#endif
 
 void clampDeepSleep() {
   const uint32_t minDeep = sSettings.displayTimeoutMs + 60000;
@@ -138,16 +195,28 @@ bool mergeFromJson(const rapidjson::Value &doc) {
   tryGetString(doc, "ble_profile", sSettings.bleProfile);
 
   clampDeepSleep();
+  sDirty = true;
   return true;
 }
 
 bool loadFromLittleFS(bool forceReload) {
   if (!forceReload && sLoadedFromDisk)
     return true;
+  if (forceReload && sDirty) {
+    Serial.println("[device_settings] skip reload — unsaved edits in RAM");
+    return true;
+  }
   const auto doc = OMOTE::JSON::GetDocument(std::filesystem::path(FS_PATH "DeviceSettings.json"));
   if (doc.HasParseError() || !doc.IsObject())
     return false;
   sLoadedFromDisk = mergeFromJson(doc);
+  if (sLoadedFromDisk) {
+    sDirty = false;
+#ifndef IS_SIMULATOR
+    Serial.printf("[device_settings] loaded ntp_display_mode=%ld ntp_server=%s\n",
+                  static_cast<long>(sSettings.ntpDisplayMode), sSettings.ntpServer.c_str());
+#endif
+  }
   return sLoadedFromDisk;
 }
 
@@ -215,13 +284,41 @@ bool saveToLittleFS() {
   d.AddMember("ftp_password", rapidjson::Value(sSettings.ftpPassword.c_str(), a), a);
   d.AddMember("ble_profile", rapidjson::Value(sSettings.bleProfile.c_str(), a), a);
 
+  const std::string body = OMOTE::JSON::ToString(d);
+#if defined(IS_SIMULATOR)
   std::ofstream out(vfsPath("DeviceSettings.json"), std::ios::out | std::ios::trunc);
   if (!out)
     return false;
-  const std::string body = OMOTE::JSON::ToString(d);
   out << body;
-  return true;
+  const bool ok = out.good();
+  out.close();
+#else
+  const bool ok = writeLittleFsFile("DeviceSettings.json", body);
+#endif
+  if (ok) {
+    sDirty = false;
+    Serial.printf("[device_settings] saved (%u bytes) ntp_display_mode=%ld ntp_server=%s\n",
+                  static_cast<unsigned>(body.length()), static_cast<long>(sSettings.ntpDisplayMode),
+                  sSettings.ntpServer.c_str());
+  } else {
+    Serial.println("[device_settings] save FAILED");
+  }
+#if defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT && !defined(IS_SIMULATOR)
+  if (ok) {
+    bridge_client::requestPushConfigFile("DeviceSettings.json");
+    bridge_client::flushPendingConfigPush(2500);
+  }
+#endif
+  return ok;
 }
+
+bool flushDirtyToDisk() {
+  if (!sDirty)
+    return true;
+  return saveToLittleFS();
+}
+
+bool isDirty() { return sDirty; }
 
 void applyToHardware() {
   auto &hw = HardwareFactory::getAbstract();

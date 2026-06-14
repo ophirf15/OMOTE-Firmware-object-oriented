@@ -19,4 +19,10 @@ public:
   virtual void setCalMode(int mode) = 0;
   virtual int getCalMode() = 0;
   virtual std::vector<uint16_t> getCalData() = 0;
+  /** Last charge-pin LOW sample count (Rev1); -1 if unsupported. */
+  virtual int getChargePinLows() const { return -1; }
+  virtual int getChargePinSampleCount() const { return 0; }
+  /** USB/external power present (may not be actively charging). */
+  virtual bool isPluggedIn() const { return false; }
+  virtual bool isChargingLatched() const { return false; }
 };

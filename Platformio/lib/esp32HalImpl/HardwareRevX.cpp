@@ -290,9 +290,6 @@ void HardwareRevX::saveSettings() {
     mPreferences.putBool("alreadySetUp", true);
   mPreferences.end();
 
-  device_settings::syncFromHardware();
-  device_settings::saveToLittleFS();
-
   mLogger->setLogModule(LogModule::Display);
   if (mLogger->isPrintWanted(LogLevel::Info))
     mLogger->log(LogLevel::Info, "Settings Saved");

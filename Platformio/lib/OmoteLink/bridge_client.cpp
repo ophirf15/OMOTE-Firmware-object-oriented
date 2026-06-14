@@ -5,6 +5,7 @@
 #if defined(OMOTE_BRIDGE_CLIENT) && !defined(IS_SIMULATOR)
 
 #include "ble_scene.hpp"
+#include "device_settings.hpp"
 #include "HaRuntime.hpp"
 #include "omote_link.hpp"
 
@@ -146,17 +147,25 @@ static constexpr size_t kManifestChunkHdr = 3;
 uint8_t sCurrentFileRetries = 0;
 bool sDeferredConfigChanged = false;
 uint32_t sDeferredConfigChangedMs = 0;
+uint32_t sSuppressConfigPullUntilMs = 0;
 std::vector<std::string> sPushQueue;
 size_t sPushNextIdx = 0;
 std::vector<uint8_t> sPushFileBuf;
 uint16_t sPushChunkOffset = 0;
 bool sPullAfterPush = false;
+std::vector<std::string> sPendingPushPaths;
+uint32_t sPendingPushDueMs = 0;
+static constexpr uint32_t kPushDebounceMs = 500;
 static constexpr char kPrefsNs[] = "omote_br";
 Preferences sPrefs;
 bool sPrefsReady = false;
 
 void collectJsonRelPaths(const char *dirPath, std::vector<std::string> &out);
 void beginResync(const char *reason);
+void beginPushToBridge(const std::vector<std::string> &paths, bool pullAfter);
+void tickPushFile();
+void startPushCurrentFile();
+void advancePushQueue();
 
 void ensurePrefs() {
   if (!sPrefsReady) {
@@ -205,7 +214,46 @@ void collectAllLocalConfigPaths(std::vector<std::string> &out) {
     collectJsonRelPaths(dir, out);
 }
 
-void startPushCurrentFile();
+void tickPendingPush() {
+  if (sPendingPushPaths.empty() || millis() < sPendingPushDueMs)
+    return;
+  if (sPhase != SyncPhase::Idle)
+    return;
+  const std::vector<std::string> paths = sPendingPushPaths;
+  sPendingPushPaths.clear();
+  sPendingPushDueMs = 0;
+  beginPushToBridge(paths, false);
+}
+
+void queuePushConfigFile(const std::string &relPath) {
+  if (relPath.empty())
+    return;
+  for (const auto &p : sPendingPushPaths) {
+    if (p == relPath) {
+      sPendingPushDueMs = millis() + kPushDebounceMs;
+      return;
+    }
+  }
+  sPendingPushPaths.push_back(relPath);
+  sPendingPushDueMs = millis() + kPushDebounceMs;
+}
+
+void flushPendingPush(uint32_t maxWaitMs) {
+  if (sPendingPushPaths.empty())
+    return;
+  sPendingPushDueMs = millis();
+  const uint32_t deadline = millis() + maxWaitMs;
+  while (millis() < deadline && !sPendingPushPaths.empty()) {
+    if (sPhase == SyncPhase::PushFile)
+      tickPushFile();
+    else
+      tickPendingPush();
+    omote_link::tick();
+    if (sPendingPushPaths.empty() && sPhase != SyncPhase::PushFile)
+      break;
+    delay(5);
+  }
+}
 void advancePushQueue();
 
 void beginPushToBridge(const std::vector<std::string> &paths, bool pullAfter) {
@@ -233,6 +281,7 @@ void advancePushQueue() {
     sPushChunkOffset = 0;
     sPhase = SyncPhase::Idle;
     Serial.println("[bridge_client] push to bridge complete");
+    sSuppressConfigPullUntilMs = millis() + 8000;
     if (sPullAfterPush) {
       sPullAfterPush = false;
       beginResync("after push to bridge");
@@ -245,6 +294,7 @@ void advancePushQueue() {
 void startPushCurrentFile() {
   if (sPushNextIdx >= sPushQueue.size())
     return;
+  device_settings::flushDirtyToDisk();
   const std::string &rel = sPushQueue[sPushNextIdx++];
   String full = String(FS_PATH) + rel.c_str();
   File f = LittleFS.open(full, "r");
@@ -869,6 +919,10 @@ void onOlpMessage(omote_link::MsgType type, const uint8_t *payload, uint16_t len
       Serial.println("[bridge_client] config changed ignored (initial sync pending)");
       break;
     }
+    if (millis() < sSuppressConfigPullUntilMs) {
+      Serial.println("[bridge_client] config changed ignored (after local push)");
+      break;
+    }
     sDeferredConfigChanged = true;
     sDeferredConfigChangedMs = millis() + kConfigChangedDebounceMs;
     Serial.println("[bridge_client] config changed — debounced pull");
@@ -967,6 +1021,8 @@ void tick() {
 
   if (sPhase == SyncPhase::PushFile)
     tickPushFile();
+
+  tickPendingPush();
 
   if (!sConfigSynced && sPhase == SyncPhase::Idle && now - sLastSyncAttemptMs > 5000) {
 
@@ -1172,6 +1228,8 @@ void sendRemotePower(bool awake) {
 void notifyRemoteSleep() {
   if (omote_link::state() != omote_link::LinkState::Linked)
     return;
+  device_settings::flushDirtyToDisk();
+  flushPendingPush(800);
   sendRemotePower(false);
   omote_link::flushOutbound(400);
   Serial.println("[bridge_client] remote sleep signaled to bridge");
@@ -1182,6 +1240,31 @@ void notifyRemoteWake() {
     return;
   sendRemotePower(true);
   Serial.println("[bridge_client] remote wake signaled to bridge");
+}
+
+void reportRemoteBattery(int soc, bool charging, int voltageMv, int chargePinLows, int chargePinSamples) {
+  if (omote_link::state() != omote_link::LinkState::Linked)
+    return;
+  static uint8_t sLastCharging = 255;
+  static uint8_t sLastSoc = 255;
+  static uint32_t sLastSendMs = 0;
+  const uint32_t now = millis();
+  const uint8_t socByte = static_cast<uint8_t>(constrain(soc, 0, 100));
+  const uint8_t chargingByte = charging ? 1 : 0;
+  const bool changed = chargingByte != sLastCharging ||
+                       (socByte > sLastSoc ? socByte - sLastSoc : sLastSoc - socByte) >= 2;
+  if (!changed && now - sLastSendMs < 5000)
+    return;
+  sLastCharging = chargingByte;
+  sLastSoc = socByte;
+  sLastSendMs = now;
+  omote_link::RemoteBatteryPayload req = {};
+  req.soc = socByte;
+  req.charging = chargingByte;
+  req.chargePinLows = static_cast<uint8_t>(chargePinLows < 0 ? 0 : chargePinLows);
+  req.chargePinSamples = static_cast<uint8_t>(chargePinSamples <= 0 ? 0 : chargePinSamples);
+  req.voltageMv = static_cast<uint16_t>(constrain(voltageMv, 0, 65535));
+  omote_link::sendToPeer(omote_link::MsgType::RemoteBattery, &req, sizeof(req));
 }
 
 void onLinked() {
@@ -1239,14 +1322,25 @@ void requestPushToBridge() {
     Serial.println("[bridge_client] config push skipped — bridge not linked");
     return;
   }
+  device_settings::flushDirtyToDisk();
   std::vector<std::string> local;
   collectAllLocalConfigPaths(local);
   if (local.empty()) {
     Serial.println("[bridge_client] config push skipped — no local config");
     return;
   }
+  sPendingPushPaths.clear();
+  sPendingPushDueMs = 0;
   beginPushToBridge(local, false);
 }
+
+void requestPushConfigFile(const std::string &relPath) {
+  if (omote_link::state() != omote_link::LinkState::Linked)
+    return;
+  queuePushConfigFile(relPath);
+}
+
+void flushPendingConfigPush(uint32_t maxWaitMs) { flushPendingPush(maxWaitMs); }
 
 void requestHaEntityPoll(const std::string &entityId) {
   if (!linked() || entityId.empty())
@@ -1342,6 +1436,10 @@ void requestConfigPull() {}
 void requestQueuedResync() {}
 
 void requestPushToBridge() {}
+
+void requestPushConfigFile(const std::string &) {}
+
+void flushPendingConfigPush(uint32_t) {}
 
 void forgetBridgeLink() {}
 

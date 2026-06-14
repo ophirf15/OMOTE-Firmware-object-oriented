@@ -5,6 +5,7 @@
 #include "List.hpp"
 #include "LvglResourceManager.hpp"
 #include "Switch.hpp"
+#include "device_settings.hpp"
 
 using namespace UI;
 using namespace UI::Page;
@@ -82,5 +83,8 @@ NtpSettings::~NtpSettings() {
   if (mSaveReqrd) {
     mWifi->ntpSaveCredentials();
     mWifi->setupNtp();
+    device_settings::syncFromHardware();
+    device_settings::saveToLittleFS();
+    HardwareFactory::getAbstract().saveSettings();
   }
 }

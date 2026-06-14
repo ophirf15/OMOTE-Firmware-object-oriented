@@ -33,15 +33,19 @@ public:
    */
   virtual bool isCharging() override;
 
-  /**
-   * @brief Function to determine if the battery is connected
-   *
-   * @return true   Battery is connected
-   * @return false  Battery is not connected
-   */
   bool isConnected();
 
+  bool isPluggedIn() const override;
+  bool isChargingLatched() const override { return mChargingLatched; }
+
   BatteryRev1(int adc_pin, int charging_pin);
+
+  int getPercentage() override;
+
+  int getChargePinLows() const override { return mLastChargePinLows; }
+  int getChargePinSampleCount() const override { return kChargePinSamples; }
+
+  static constexpr int kChargePinSamples = 32;
 
   // Not sure why this is needed but shared_ptr seems to really
   // need it possibly a compiler template handling limitation
@@ -62,6 +66,22 @@ private:
    *
    */
   int mChargingPin;
+
+  int mFilteredVoltageMv = 0;
+  int mDisplayedSoc = -1;
+  bool mChargingLatched = false;
+  bool mChargingLastRaw = false;
+  uint8_t mChargingStable = 0;
+  int mLastChargePinLows = 0;
+  int mVoltageBaselineMv = 0;
+  uint32_t mLastDebugMs = 0;
+  uint8_t mSocDropStreak = 0;
+  uint8_t mLowVoltageStreak = 0;
+  uint8_t mVoltageOutlierStreak = 0;
+
+  int readRawVoltageMv();
+  int sampleChargingPinLows();
+  void updateVoltageBaseline(int mv);
 
   using BatteryRevX::mLogger;
   using BatteryRevX::mLogStream;

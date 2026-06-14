@@ -10,6 +10,10 @@
 #include "SettingsPage.hpp"
 #include "observerHandles.hpp"
 
+#if defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT
+#include "bridge_client.hpp"
+#endif
+
 #define BUF_SIZE 10
 #define RED_SOC_THRESH 10
 
@@ -57,7 +61,7 @@ StatusBar::StatusBar(DeviceFactory &aFactory)
 
   mTopBarGeneralLabel->BindTextEvent(GENERAL_STATUS, NULL);
 
-  mTimer = lv_timer_create(StatusBar::onTimer, 100, this);
+  mTimer = lv_timer_create(StatusBar::onTimer, 500, this);
 
   mTopBarActiveListButton->OnShortClick([this] { mSceneChange->notify("TheNewScene"); })
       .OnLongHold([this] { PushActiveDeviceList(); });
@@ -86,28 +90,35 @@ void StatusBar::OnShow() {
 void StatusBar::onTimer(_lv_timer_t *aTimer) {
   StatusBar *statusBar = reinterpret_cast<StatusBar *>(lv_timer_get_user_data(aTimer));
 
-  int32_t iSoc = HardwareFactory::getAbstract().battery()->getPercentage();
-  if (HardwareFactory::getAbstract().battery()->isCharging())
+  auto battery = HardwareFactory::getAbstract().battery();
+  int32_t iSoc = battery->getPercentage();
+  const bool charging = battery->isCharging();
+  const bool plugged = battery->isPluggedIn();
+  if (charging)
     statusBar->mTopBarBatteryLabel->SetText(LV_SYMBOL_CHARGE);
-  else if (HardwareFactory::getAbstract().isUsbConnected())
+  else if (plugged || HardwareFactory::getAbstract().isUsbConnected())
     statusBar->mTopBarBatteryLabel->SetText(LV_SYMBOL_USB);
   else {
-    if (iSoc < RED_SOC_THRESH) {
-      statusBar->mTopBarBatteryLabel->SetTextStyle(UI::TextStyle().Color(UI::Color::RED));
-    } else {
-      statusBar->mTopBarBatteryLabel->SetTextStyle(UI::TextStyle().Color(UI::Color::WHITE));
-      if (iSoc < 13)
-        statusBar->mTopBarBatteryLabel->SetText(LV_SYMBOL_BATTERY_EMPTY);
-      else if (iSoc < 38)
-        statusBar->mTopBarBatteryLabel->SetText(LV_SYMBOL_BATTERY_1);
-      else if (iSoc < 63)
-        statusBar->mTopBarBatteryLabel->SetText(LV_SYMBOL_BATTERY_2);
-      else if (iSoc < 88)
-        statusBar->mTopBarBatteryLabel->SetText(LV_SYMBOL_BATTERY_3);
-      else
-        statusBar->mTopBarBatteryLabel->SetText(LV_SYMBOL_BATTERY_FULL);
-    }
+    statusBar->mTopBarBatteryLabel->SetTextStyle(
+        UI::TextStyle().Color(iSoc < RED_SOC_THRESH ? UI::Color::RED : UI::Color::WHITE));
+    if (iSoc < 13)
+      statusBar->mTopBarBatteryLabel->SetText(LV_SYMBOL_BATTERY_EMPTY);
+    else if (iSoc < 38)
+      statusBar->mTopBarBatteryLabel->SetText(LV_SYMBOL_BATTERY_1);
+    else if (iSoc < 63)
+      statusBar->mTopBarBatteryLabel->SetText(LV_SYMBOL_BATTERY_2);
+    else if (iSoc < 88)
+      statusBar->mTopBarBatteryLabel->SetText(LV_SYMBOL_BATTERY_3);
+    else
+      statusBar->mTopBarBatteryLabel->SetText(LV_SYMBOL_BATTERY_FULL);
   }
+
+#if defined(OMOTE_BRIDGE_CLIENT) && OMOTE_BRIDGE_CLIENT
+  if (bridge_client::linked()) {
+    bridge_client::reportRemoteBattery(iSoc, charging || plugged, battery->getVoltage(),
+                                       battery->getChargePinLows(), battery->getChargePinSampleCount());
+  }
+#endif
 
   char strftime_buf[BUF_SIZE];
   bool displayTime = false;

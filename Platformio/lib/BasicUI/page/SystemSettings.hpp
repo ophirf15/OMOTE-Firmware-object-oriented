@@ -25,9 +25,9 @@ protected:
 
 private:
   void buildFromSchema();
-  void patchBool(const char *key, bool value);
-  void patchInt(const char *key, int32_t value);
-  void patchString(const char *key, const std::string &value);
+  void patchBool(const char *key, bool value, bool persistNow = true);
+  void patchInt(const char *key, int32_t value, bool persistNow = false);
+  void patchString(const char *key, const std::string &value, bool persistNow = true);
   int32_t readIntField(const char *key, int32_t fallback) const;
   bool readBoolField(const char *key, bool fallback) const;
   std::string readStringField(const char *key, const std::string &fallback) const;
