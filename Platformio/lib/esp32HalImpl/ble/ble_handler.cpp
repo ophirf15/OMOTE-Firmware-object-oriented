@@ -204,6 +204,7 @@ static constexpr uint16_t HID_CC_NOTIFICATION      = 0x02A2;  /* → KEY_ALL_APP
  * silently turn into KEYCODE_UNKNOWN on stock Google TV. Kept here so they
  * still work on richer .kl files (e.g. when the user picks the
  * google-reference-rcu profile). */
+static constexpr uint16_t HID_CC_MEDIA_AUDIO_TRACK = 0x0173; /* Generic.kl override → MEDIA_AUDIO_TRACK */
 static constexpr uint16_t HID_CC_INFO              = 0x01BD;  /* → KEY_INFO (358); Generic.kl: not mapped */
 static constexpr uint16_t HID_CC_TV_TELETEXT       = 0x0185;  /* kernel: not mapped; .kl-dependent */
 
@@ -506,6 +507,7 @@ static uint16_t consumerUsageFor(const String &k) {
   if (k == "PROFILE_SWITCH")       return HID_CC_PROFILE_SWITCH;
   if (k == "ALL_APPS" || k == "APP_SWITCH") return HID_CC_ALL_APPS;
   if (k == "ASSIST" || k == "VOICE_ASSIST") return HID_CC_ASSIST;
+  if (k == "MEDIA_AUDIO_TRACK") return HID_CC_MEDIA_AUDIO_TRACK;
   if (k == "TV_TELETEXT")          return HID_CC_TV_TELETEXT; /* not on Generic.kl */
   if (k == "PROG_RED")             return HID_CC_PROG_RED;
   if (k == "PROG_GREEN")           return HID_CC_PROG_GREEN;

@@ -614,7 +614,7 @@ bool JsonHomeScreen::OnKeyEvent(KeyPressAbstract::KeyEvent aKeyEvent) {
     if (range.first != mOverrideKeyHandlers.end()) {
       for (auto i = range.first; i != range.second; ++i) {
         if (i->second.pressType == aKeyEvent.mType) {
-          Command::Commands::sendCommand(i->second.command);
+          Command::Commands::executeKey(i->second);
           return true;
         }
       }

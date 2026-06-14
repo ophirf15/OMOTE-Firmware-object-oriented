@@ -1,4 +1,5 @@
 #include "Command.hpp"
+#include "HaRuntime.hpp"
 #include "HardwareFactory.hpp"
 #if OMOTE_BLE
 #include "ble_scene.hpp"
@@ -73,6 +74,19 @@ CommandMode Commands::getCommand(const std::string &aCommandFile, const std::str
 }
 
 void Commands::releaseCachedDocuments() { commandDocCache().clear(); }
+
+bool Commands::executeKey(const KeyStruct &aKey) {
+  if (aKey.kind == KeyActionKind::Ha) {
+    if (aKey.ha.entityId.empty())
+      return false;
+    return HaRuntime::callService(aKey.ha.domain, aKey.ha.service, aKey.ha.entityId);
+  }
+  if (aKey.command.mode != NONE) {
+    sendCommand(aKey.command);
+    return true;
+  }
+  return false;
+}
 
 void Commands::sendCommand(const CommandStruct &aCommandStruct) {
   if ((aCommandStruct.mode == MQTT) && (aCommandStruct.protocol == "PUB")) {

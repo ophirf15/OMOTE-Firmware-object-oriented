@@ -244,6 +244,8 @@ python -m http.server 8080</pre>
                   <option value="ir">Send infrared (TV / receiver / etc.)</option>
                   <option value="ble" id="action-type-ble">Send Bluetooth key</option>
                   <option value="ir_existing">Use existing command from this device</option>
+                  <option value="ui_widget">Trigger screen widget action</option>
+                  <option value="ha">Home Assistant action</option>
                 </select>
               </label>
               <div id="panel-ir">
@@ -253,14 +255,33 @@ python -m http.server 8080</pre>
               </div>
               <div id="panel-ble" class="hidden ble-scene-only">
                 <label>BLE key
-                  <select id="key-ble-key"></select>
+                  <input type="text" id="key-ble-key" list="ble-key-list" />
                 </label>
                 <label>Save as command <input id="action-ble-cmd-name" placeholder="VOL_UP" /></label>
-                <p class="muted small">Creates a BLE entry in the page command file and maps this physical key to it.</p>
+                <p class="muted small">Pick from the list or type any key the firmware accepts (e.g. <code>KEYCODE_GUIDE</code>, <code>BUTTON_3</code>).</p>
               </div>
               <div id="panel-ir-existing" class="hidden">
                 <label>Pick command
                   <select id="action-cmd-pick"></select>
+                </label>
+              </div>
+              <div id="panel-ui-widget" class="hidden">
+                <label>Screen widget
+                  <select id="key-widget-pick"></select>
+                </label>
+                <p class="muted small">Runs the same action as tapping that widget (IR/BLE command or HA toggle).</p>
+              </div>
+              <div id="panel-key-ha" class="hidden">
+                <div class="domain-tabs" id="key-ha-domain-tabs"></div>
+                <input id="key-ha-entity-search" placeholder="Search entities…" />
+                <p id="key-ha-entity-status" class="muted small"></p>
+                <select id="key-ha-entity-pick" size="6"></select>
+                <label>Service
+                  <select id="key-ha-service">
+                    <option value="toggle">toggle</option>
+                    <option value="turn_on">turn_on</option>
+                    <option value="turn_off">turn_off</option>
+                  </select>
                 </label>
               </div>
               <div id="panel-key-advanced" class="advanced-field hidden">
@@ -386,12 +407,13 @@ python -m http.server 8080</pre>
         </aside>
         <div class="panel grow">
           <h2>IR &amp; action codes</h2>
-          <p class="muted">Usually managed automatically when you learn buttons on the Remote tab.</p>
+          <p class="muted">Usually managed automatically when you learn buttons on the Remote tab. BLE Protocol accepts any key from the catalog or typed manually (<code>KEYCODE_*</code>, <code>BUTTON_N</code>, letters, digits).</p>
           <datalist id="ble-key-list"></datalist>
           <table id="cmd-table"><thead><tr><th>Name</th><th>Mode</th><th>Protocol / BLE key</th><th>Data</th><th></th></tr></thead><tbody></tbody></table>
           <div class="row">
             <button type="button" id="btn-add-command">+ Add</button>
             <button type="button" id="btn-import-gtv-commands">Import Google TV BLE</button>
+            <button type="button" id="btn-import-full-ble-catalog">Import full BLE catalog</button>
             <button type="button" id="btn-learn-ir">Learn IR</button>
           </div>
           <p id="learn-msg" class="msg"></p>
@@ -413,6 +435,7 @@ python -m http.server 8080</pre>
   </footer>
   <script src="./jszip.min.js"></script>
   <script src="./settings-form.js?v=5"></script>
-  <script src="./app.js?v=6"></script>
+  <script src="./ble-key-catalog.js?v=1"></script>
+  <script src="./app.js?v=8"></script>
 </body>
 </html>

@@ -638,95 +638,10 @@ const DEFAULT_CMD_FOR_KEY = {
   Aux1: 'RED', Aux2: 'GREEN', Aux3: 'YELLOW', Aux4: 'BLUE'
 };
 
-/** BLE keys aligned with firmware ble_handler.cpp (Android KeyEvent / HID). */
-const BLE_KEY_CATALOG = [
-  {
-    group: 'Navigation (DPAD)',
-    keys: [
-      { id: 'UP', label: 'DPAD_UP' },
-      { id: 'DOWN', label: 'DPAD_DOWN' },
-      { id: 'LEFT', label: 'DPAD_LEFT' },
-      { id: 'RIGHT', label: 'DPAD_RIGHT' },
-      { id: 'ENTER', label: 'DPAD_CENTER / OK' },
-      { id: 'BACK', label: 'BACK' },
-      { id: 'HOME', label: 'HOME' },
-      { id: 'MENU', label: 'MENU' },
-      { id: 'SEARCH', label: 'SEARCH' },
-      { id: 'APP_SWITCH', label: 'APP_SWITCH (recents)' },
-    ],
-  },
-  {
-    group: 'Volume & media',
-    keys: [
-      { id: 'VOLUME_UP', label: 'VOLUME_UP' },
-      { id: 'VOLUME_DOWN', label: 'VOLUME_DOWN' },
-      { id: 'MUTE', label: 'VOLUME_MUTE' },
-      { id: 'PLAY_PAUSE', label: 'MEDIA_PLAY_PAUSE' },
-      { id: 'PLAY', label: 'MEDIA_PLAY' },
-      { id: 'PAUSE', label: 'MEDIA_PAUSE' },
-      { id: 'STOP', label: 'MEDIA_STOP' },
-      { id: 'NEXT', label: 'MEDIA_NEXT' },
-      { id: 'PREVIOUS', label: 'MEDIA_PREVIOUS' },
-      { id: 'FORWARD', label: 'MEDIA_FAST_FORWARD' },
-      { id: 'REWIND', label: 'MEDIA_REWIND' },
-    ],
-  },
-  {
-    group: 'TV / live',
-    keys: [
-      { id: 'CHANNEL_UP', label: 'CHANNEL_UP' },
-      { id: 'CHANNEL_DOWN', label: 'CHANNEL_DOWN' },
-      { id: 'GUIDE', label: 'GUIDE (EPG)' },
-      { id: 'INFO', label: 'INFO' },
-      { id: 'CAPTIONS', label: 'CAPTIONS' },
-      { id: 'SETTINGS', label: 'SETTINGS' },
-      { id: 'TV', label: 'TV' },
-      { id: 'LIVE_TV', label: 'LIVE / LIVE_TV' },
-      { id: 'TV_INPUT', label: 'TV_INPUT' },
-      { id: 'DVR', label: 'DVR' },
-      { id: 'NOTIFICATION', label: 'NOTIFICATION' },
-      { id: 'PROFILE_SWITCH', label: 'PROFILE_SWITCH' },
-      { id: 'POWER', label: 'POWER (sleep/wake)' },
-      { id: 'TV_POWER', label: 'TV_POWER' },
-      { id: 'SLEEP', label: 'SLEEP' },
-      { id: 'PROG_RED', label: 'PROG_RED' },
-      { id: 'PROG_GREEN', label: 'PROG_GREEN' },
-      { id: 'PROG_YELLOW', label: 'PROG_YELLOW' },
-      { id: 'PROG_BLUE', label: 'PROG_BLUE' },
-      { id: 'MEDIA_AUDIO_TRACK', label: 'MEDIA_AUDIO_TRACK' },
-    ],
-  },
-  {
-    group: 'Assistant & editing',
-    keys: [
-      { id: 'ASSIST', label: 'ASSIST / voice' },
-      { id: 'VOICE_ASSIST', label: 'VOICE_ASSIST' },
-      { id: 'TAB', label: 'TAB' },
-      { id: 'PAGE_UP', label: 'PAGE_UP' },
-      { id: 'PAGE_DOWN', label: 'PAGE_DOWN' },
-      { id: 'BACKSPACE', label: 'BACK / DEL' },
-      { id: 'DELETE', label: 'FORWARD_DEL' },
-    ],
-  },
-  {
-    group: 'Streaming apps (gamepad)',
-    keys: [
-      { id: 'NETFLIX', label: 'Netflix → BUTTON_3' },
-      { id: 'YOUTUBE', label: 'YouTube → BUTTON_4' },
-      { id: 'PRIME_VIDEO', label: 'Prime → BUTTON_5' },
-      { id: 'DISNEY_PLUS', label: 'Disney+ → BUTTON_6' },
-      { id: 'SPOTIFY', label: 'Spotify → BUTTON_7' },
-      { id: 'BUTTON_1', label: 'BUTTON_1' },
-      { id: 'BUTTON_2', label: 'BUTTON_2' },
-      { id: 'BUTTON_3', label: 'BUTTON_3 (Netflix on GTV)' },
-      { id: 'BUTTON_4', label: 'BUTTON_4' },
-      { id: 'BUTTON_5', label: 'BUTTON_5' },
-      { id: 'BUTTON_6', label: 'BUTTON_6' },
-      { id: 'BUTTON_7', label: 'BUTTON_7' },
-      { id: 'BUTTON_8', label: 'BUTTON_8' },
-    ],
-  },
-];
+/** BLE keys — full catalog in ble-key-catalog.js (firmware + Generic.kl). */
+const BLE_KEY_CATALOG = window.OMOTE_BLE_KEY_CATALOG || [];
+
+const BLE_KEY_PLACEHOLDER = 'HOME, DPAD_CENTER, KEYCODE_VOLUME_UP, BUTTON_3, …';
 
 function buildBleKeySelectHtml() {
   return BLE_KEY_CATALOG.map((g) => {
@@ -735,14 +650,25 @@ function buildBleKeySelectHtml() {
   }).join('');
 }
 
+function populateBleKeyField(el, selectedId = '') {
+  if (!el) return;
+  if (el.tagName === 'SELECT') {
+    el.innerHTML = `<option value="">— pick BLE key —</option>${buildBleKeySelectHtml()}`;
+    if (selectedId) el.value = selectedId;
+    return;
+  }
+  el.setAttribute('list', 'ble-key-list');
+  el.placeholder = BLE_KEY_PLACEHOLDER;
+  if (selectedId) el.value = selectedId;
+}
+
+/** @deprecated use populateBleKeyField */
 function populateBleKeySelectElement(sel, selectedId = '') {
-  if (!sel) return;
-  sel.innerHTML = `<option value="">— pick BLE key —</option>${buildBleKeySelectHtml()}`;
-  if (selectedId) sel.value = selectedId;
+  populateBleKeyField(sel, selectedId);
 }
 
 function populateBleKeySelects() {
-  populateBleKeySelectElement($('key-ble-key'));
+  populateBleKeyField($('key-ble-key'));
   const datalist = $('ble-key-list');
   if (datalist) {
     datalist.innerHTML = '';
@@ -755,9 +681,9 @@ function populateBleKeySelects() {
       });
     });
   }
-  document.querySelectorAll('select.page-cmd-ble-key').forEach((sel) => {
-    const cur = sel.value;
-    populateBleKeySelectElement(sel, cur);
+  document.querySelectorAll('select.page-cmd-ble-key, input.page-cmd-ble-key').forEach((el) => {
+    const cur = el.value || '';
+    populateBleKeyField(el, cur);
   });
 }
 
@@ -1462,6 +1388,24 @@ function renderHaDomainTabs() {
   });
 }
 
+function renderKeyHaDomainTabs() {
+  const root = $('key-ha-domain-tabs');
+  if (!root) return;
+  root.innerHTML = '';
+  HA_DOMAINS.forEach((d) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = d;
+    b.className = d === haActiveDomain ? 'active' : '';
+    b.onclick = () => {
+      haActiveDomain = d;
+      renderKeyHaDomainTabs();
+      populateKeyHaEntityPicker({ domain: d });
+    };
+    root.appendChild(b);
+  });
+}
+
 async function populateHaEntityPicker(opts = {}) {
   const status = $('ha-entity-status');
   const sel = $('ha-entity-pick');
@@ -1487,6 +1431,60 @@ async function populateHaEntityPicker(opts = {}) {
   } catch (e) {
     status.textContent = haBrowserErrorHint(e);
   }
+}
+
+async function populateKeyHaEntityPicker(opts = {}) {
+  const status = $('key-ha-entity-status');
+  const sel = $('key-ha-entity-pick');
+  if (!status || !sel) return;
+  const domain = opts.domain || haActiveDomain || 'light';
+  const search = ($('key-ha-entity-search')?.value || '').trim();
+  const selected = opts.selected ?? sel.value ?? '';
+  status.textContent = 'Loading entities…';
+  sel.innerHTML = '';
+  try {
+    const data = await haBrowserListEntities(domain, search);
+    status.textContent = `${data.entities.length} ${domain} entities`;
+    data.entities.forEach((e) => {
+      const o = document.createElement('option');
+      o.value = e.entity_id;
+      o.textContent = `${e.friendly_name || e.entity_id} — ${e.state}`;
+      if (e.entity_id === selected) o.selected = true;
+      sel.appendChild(o);
+    });
+  } catch (e) {
+    status.textContent = haBrowserErrorHint(e);
+  }
+}
+
+function populateKeyWidgetPick(selectedIdx = null) {
+  const sel = $('key-widget-pick');
+  if (!sel) return;
+  const items = bindableWidgets();
+  sel.innerHTML = '';
+  if (!items.length) {
+    const o = document.createElement('option');
+    o.value = '';
+    o.textContent = '— add a button or HA widget on screen first —';
+    sel.appendChild(o);
+    return;
+  }
+  items.forEach(({ w, i }) => {
+    const o = document.createElement('option');
+    o.value = String(i);
+    o.textContent = widgetSummary(w);
+    if (selectedIdx != null && i === selectedIdx) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+function syncKeyHaFromMapping(val) {
+  if (!val || typeof val !== 'object') return;
+  const entityId = val.EntityId || '';
+  if (entityId) haActiveDomain = entityId.split('.')[0] || haActiveDomain;
+  renderKeyHaDomainTabs();
+  if ($('key-ha-service') && val.Service) $('key-ha-service').value = val.Service;
+  populateKeyHaEntityPicker({ selected: entityId }).catch(() => {});
 }
 
 function applyHaEntityPickToWidget() {
@@ -2183,9 +2181,49 @@ function describeCommand(cmdName, pagePath) {
   return cmdName;
 }
 
-function getKeyMapping(keyName, pressType = 'Press') {
+function getKeyMappingValue(keyName, pressType = 'Press') {
   const page = currentPage();
-  return page.ButtonMaps?.[keyName]?.[pressType] || page.ButtonMaps?.[keyName]?.Press || '';
+  const map = page.ButtonMaps?.[keyName];
+  if (!map) return null;
+  return map[pressType] ?? map.Press ?? null;
+}
+
+function describeKeyMapping(val, pagePath) {
+  if (val == null || val === '') return '';
+  if (typeof val === 'string') return describeCommand(val, pagePath);
+  if (typeof val !== 'object') return String(val);
+  if (val.Action === 'Widget' || val.WidgetIndex != null) {
+    const page = parseJson(pagePath || selectedPagePath);
+    const w = page?.Widgets?.[val.WidgetIndex];
+    return w ? `UI · ${widgetSummary(w)}` : `UI · widget #${val.WidgetIndex}`;
+  }
+  if (val.Action === 'HA' || val.EntityId) {
+    const svc = val.Service || 'toggle';
+    return `HA · ${svc} · ${val.EntityId || ''}`.replace(/ · $/, '');
+  }
+  return 'Custom action';
+}
+
+function isBindableWidget(w) {
+  if (!w?.Type) return false;
+  if (w.Type === 'Button' || w.Type === 'Label') {
+    const cmd = typeof w.Command === 'string' ? w.Command : '';
+    return !!cmd;
+  }
+  if (w.Type === 'HaToggle' || w.Type === 'HaSwitch' || w.Type === 'HaMomentary') {
+    return !!w.EntityId;
+  }
+  return false;
+}
+
+function bindableWidgets(page = currentPage()) {
+  return (page?.Widgets || []).map((w, i) => ({ w, i })).filter(({ w }) => isBindableWidget(w));
+}
+
+function getKeyMapping(keyName, pressType = 'Press') {
+  const val = getKeyMappingValue(keyName, pressType);
+  if (typeof val === 'string') return val;
+  return '';
 }
 
 function currentPage() {
@@ -2442,9 +2480,10 @@ function renderPageCommandsPanel() {
       input.dispatchEvent(new Event('change'));
     };
 
-    const bleKeyInput = document.createElement('select');
+    const bleKeyInput = document.createElement('input');
+    bleKeyInput.type = 'text';
     bleKeyInput.className = 'page-cmd-ble-key';
-    populateBleKeySelectElement(bleKeyInput, rowMode === 'BLE' ? (rowState?.Protocol || '') : '');
+    populateBleKeyField(bleKeyInput, rowMode === 'BLE' ? (rowState?.Protocol || '') : '');
 
     const actionBtn = document.createElement('button');
     actionBtn.type = 'button';
@@ -2835,6 +2874,9 @@ $('ha-entity-search')?.addEventListener('input', () => {
 });
 $('ha-entity-pick')?.addEventListener('change', () => applyHaEntityPickToWidget());
 $('ha-service')?.addEventListener('change', () => applyHaEntityPickToWidget());
+$('key-ha-entity-search')?.addEventListener('input', () => {
+  populateKeyHaEntityPicker().catch(() => {});
+});
 
 $('btn-export-omote')?.addEventListener('click', handleExportOmotePack);
 $('btn-export-omote-footer')?.addEventListener('click', handleExportOmotePack);
@@ -3174,12 +3216,12 @@ function renderRemoteKeymap() {
   face.classList.toggle('pcb-stock', !is3661);
 
   const makeBtn = (keyId, label, shape, extra = '') => {
-    const mapped = getKeyMapping(keyId);
+    const mapped = getKeyMappingValue(keyId);
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'remote-key' + (shape ? ' ' + shape : '') + (mapped ? ' mapped' : '') +
       (selection.kind === 'key' && selection.keyName === keyId ? ' selected' : '') + extra;
-    btn.innerHTML = `<span class="rk-lbl">${label}</span><span class="rk-map">${describeCommand(mapped, selectedPagePath) || '—'}</span>`;
+    btn.innerHTML = `<span class="rk-lbl">${label}</span><span class="rk-map">${describeKeyMapping(mapped, selectedPagePath) || '—'}</span>`;
     btn.onclick = () => selectKey(keyId, label);
     return btn;
   };
@@ -3402,12 +3444,28 @@ function widgetSummary(w) {
   return cmd ? `${text} → ${cmd}` : text;
 }
 
+function reindexButtonMapWidgetRefs(page, removedIdx) {
+  if (!page?.ButtonMaps) return;
+  Object.values(page.ButtonMaps).forEach((pressMap) => {
+    if (!pressMap || typeof pressMap !== 'object') return;
+    Object.keys(pressMap).forEach((pressType) => {
+      const val = pressMap[pressType];
+      if (!val || typeof val !== 'object') return;
+      if (val.Action !== 'Widget' && val.WidgetIndex == null) return;
+      const wi = val.WidgetIndex;
+      if (wi === removedIdx) delete pressMap[pressType];
+      else if (wi > removedIdx) val.WidgetIndex = wi - 1;
+    });
+  });
+}
+
 function deleteWidgetAt(idx) {
   const page = currentPage();
   const w = page.Widgets?.[idx];
   if (!w) return;
   const label = widgetSummary(w);
   if (!confirm(`Delete widget “${label}”?`)) return;
+  reindexButtonMapWidgetRefs(page, idx);
   page.Widgets.splice(idx, 1);
   page.Widgets.forEach((wg, i) => {
     if (wg.AlignTo != null && wg.AlignTo > idx) wg.AlignTo -= 1;
@@ -3553,25 +3611,42 @@ function updateSelectionPanel(friendlyLabel) {
   } else {
     $('selection-title').textContent = 'Physical key';
     $('selection-sub').textContent = friendlyLabel || KEY_LABELS[selection.keyName] || selection.keyName;
-    const mapped = getKeyMapping(selection.keyName, $('key-press-type')?.value || 'Press');
+    const pressType = $('key-press-type')?.value || 'Press';
+    const mapped = getKeyMappingValue(selection.keyName, pressType);
     const cf = ensurePageCommandFile();
-    const mappedRow = mapped ? getCommandRow(cf, mapped) : null;
     const defaultCmd = DEFAULT_CMD_FOR_KEY[selection.keyName] || selection.keyName.toUpperCase();
     $('action-cmd-name').value = defaultCmd;
     if ($('action-ble-cmd-name')) {
-      $('action-ble-cmd-name').value = mapped && mappedRow?.Mode === 'BLE' ? mapped : defaultCmd;
+      $('action-ble-cmd-name').value = defaultCmd;
     }
-    if (mapped && mappedRow?.Mode === 'BLE' && activeSceneUsesBle()) {
-      $('action-type').value = 'ble';
-      if ($('key-ble-key')) {
-        $('key-ble-key').value = mappedRow.Protocol || defaultBleKeyForPhysicalKey(selection.keyName);
+    if (mapped && typeof mapped === 'object') {
+      if (mapped.Action === 'Widget' || mapped.WidgetIndex != null) {
+        $('action-type').value = 'ui_widget';
+        populateKeyWidgetPick(mapped.WidgetIndex);
+      } else if (mapped.Action === 'HA' || mapped.EntityId) {
+        $('action-type').value = 'ha';
+        syncKeyHaFromMapping(mapped);
+      } else {
+        $('action-type').value = activeSceneUsesBle() ? 'ble' : 'ir';
       }
     } else {
-      $('action-type').value = mapped ? 'ir_existing' : (activeSceneUsesBle() ? 'ble' : 'ir');
-      if ($('key-ble-key') && $('action-type').value === 'ble') {
-        $('key-ble-key').value = defaultBleKeyForPhysicalKey(selection.keyName);
+      const mappedStr = typeof mapped === 'string' ? mapped : '';
+      const mappedRow = mappedStr ? getCommandRow(cf, mappedStr) : null;
+      if ($('action-ble-cmd-name')) {
+        $('action-ble-cmd-name').value = mappedStr && mappedRow?.Mode === 'BLE' ? mappedStr : defaultCmd;
       }
-      populateActionCmdPick(mapped);
+      if (mappedStr && mappedRow?.Mode === 'BLE' && activeSceneUsesBle()) {
+        $('action-type').value = 'ble';
+        if ($('key-ble-key')) {
+          $('key-ble-key').value = mappedRow.Protocol || defaultBleKeyForPhysicalKey(selection.keyName);
+        }
+      } else {
+        $('action-type').value = mappedStr ? 'ir_existing' : (activeSceneUsesBle() ? 'ble' : 'ir');
+        if ($('key-ble-key') && $('action-type').value === 'ble') {
+          $('key-ble-key').value = defaultBleKeyForPhysicalKey(selection.keyName);
+        }
+        populateActionCmdPick(mappedStr);
+      }
     }
     syncWidgetEditor();
   }
@@ -3612,10 +3687,20 @@ function syncActionPanels() {
   $('panel-ir')?.classList.toggle('hidden', t !== 'ir');
   $('panel-ble')?.classList.toggle('hidden', t !== 'ble');
   $('panel-ir-existing')?.classList.toggle('hidden', t !== 'ir_existing');
+  $('panel-ui-widget')?.classList.toggle('hidden', t !== 'ui_widget');
+  $('panel-key-ha')?.classList.toggle('hidden', t !== 'ha');
   $('panel-key-advanced')?.classList.toggle('hidden', selection.kind !== 'key');
+  if (t === 'ui_widget') populateKeyWidgetPick();
+  if (t === 'ha') {
+    renderKeyHaDomainTabs();
+    populateKeyHaEntityPicker().catch(() => {});
+  }
 }
 
 $('action-type')?.addEventListener('change', syncActionPanels);
+$('key-press-type')?.addEventListener('change', () => {
+  if (selection.kind === 'key') updateSelectionPanel(KEY_LABELS[selection.keyName] || selection.keyName);
+});
 $('widget-action-type')?.addEventListener('change', () => {
   $('widget-panel-ir')?.classList.toggle('hidden', $('widget-action-type').value !== 'ir');
   $('widget-panel-existing')?.classList.toggle('hidden', $('widget-action-type').value !== 'ir_existing');
@@ -3697,13 +3782,14 @@ $('btn-key-apply').onclick = () => {
   const page = currentPage();
   page.ButtonMaps = page.ButtonMaps || {};
   const pt = $('key-press-type').value;
-  let cmd = '';
-  if (t === 'ir_existing') cmd = $('action-cmd-pick').value;
-  else if (t === 'ble') {
+  let mapping = null;
+  if (t === 'ir_existing') {
+    mapping = $('action-cmd-pick').value;
+  } else if (t === 'ble') {
     const bleKey = $('key-ble-key')?.value?.trim();
     if (!bleKey) return;
     const cf = ensurePageCommandFile();
-    cmd = $('action-ble-cmd-name')?.value?.trim()
+    const cmd = $('action-ble-cmd-name')?.value?.trim()
       || DEFAULT_CMD_FOR_KEY[selection.keyName]
       || selection.keyName.toUpperCase();
     try {
@@ -3715,12 +3801,32 @@ $('btn-key-apply').onclick = () => {
     }
     populateActionCmdPick(cmd);
     renderPageCommandsPanel();
+    mapping = cmd;
+  } else if (t === 'ui_widget') {
+    const idx = parseInt($('key-widget-pick')?.value, 10);
+    if (Number.isNaN(idx)) return;
+    mapping = { Action: 'Widget', WidgetIndex: idx };
+  } else if (t === 'ha') {
+    const entityId = $('key-ha-entity-pick')?.value;
+    if (!entityId) return;
+    mapping = {
+      Action: 'HA',
+      EntityId: entityId,
+      Domain: entityId.split('.')[0] || 'light',
+      Service: $('key-ha-service')?.value || 'toggle',
+    };
   } else {
-    cmd = $('action-cmd-name').value.trim();
+    mapping = $('action-cmd-name').value.trim();
   }
-  if (!cmd) return;
+  if (!mapping || mapping === '') return;
   page.ButtonMaps[selection.keyName] = page.ButtonMaps[selection.keyName] || {};
-  page.ButtonMaps[selection.keyName][pt] = cmd;
+  page.ButtonMaps[selection.keyName][pt] = mapping;
+  if (t === 'ui_widget' && pt === 'Press') {
+    const w = page.Widgets?.[mapping.WidgetIndex];
+    if (w?.Type === 'HaMomentary') {
+      page.ButtonMaps[selection.keyName].Release = { Action: 'Widget', WidgetIndex: mapping.WidgetIndex };
+    }
+  }
   savePage(page);
   refreshRemoteTab();
 };
@@ -4316,11 +4422,12 @@ function renderCommandsTable() {
       const cur = parseJson(selectedCmdFile)?.[key]?.[idx]?.Protocol || proto;
       protoCell.innerHTML = '';
       if (modeSel.value === 'BLE') {
-        const sel = document.createElement('select');
-        sel.dataset.f = 'proto';
-        populateBleKeySelectElement(sel, cur);
-        sel.onchange = saveRow;
-        protoCell.appendChild(sel);
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.dataset.f = 'proto';
+        populateBleKeyField(inp, cur);
+        inp.onchange = saveRow;
+        protoCell.appendChild(inp);
       } else {
         const inp = document.createElement('input');
         inp.dataset.f = 'proto';
@@ -4353,6 +4460,28 @@ $('btn-add-command')?.addEventListener('click', () => {
   renderCommandsTable();
 });
 
+function importFullBleCatalog(path) {
+  const doc = parseJson(path) || { Manufacturer: 'BLE HID', DeviceClass: 'Generic', Commands: [] };
+  doc.Commands = doc.Commands || [];
+  const seen = new Set(doc.Commands.filter((c) => c.Mode === 'BLE').map((c) => c.Protocol));
+  let added = 0;
+  for (const group of BLE_KEY_CATALOG) {
+    for (const k of group.keys) {
+      if (seen.has(k.id)) continue;
+      doc.Commands.push({
+        Command: `BLE_${k.id}`,
+        Mode: 'BLE',
+        Protocol: k.id,
+        Data: [],
+      });
+      seen.add(k.id);
+      added++;
+    }
+  }
+  setFile(path, doc);
+  return added;
+}
+
 $('btn-import-gtv-commands')?.addEventListener('click', () => {
   const path = 'Commands/Commands_GoogleTV.json';
   const tpl = DEVICE_TEMPLATES.googletv?.commands;
@@ -4364,6 +4493,22 @@ $('btn-import-gtv-commands')?.addEventListener('click', () => {
   const msg = $('learn-msg');
   if (msg) {
     msg.textContent = `Loaded ${path} (${tpl.Commands.length} BLE keys). Save to remote to deploy on bridge.`;
+    msg.className = 'msg ok';
+  }
+});
+
+$('btn-import-full-ble-catalog')?.addEventListener('click', () => {
+  const path = selectedCmdFile || $('cmd-file-select')?.value || 'Commands/Commands_GoogleTV.json';
+  if (!files.has(path)) {
+    setFile(path, { Manufacturer: 'BLE HID', DeviceClass: 'Generic', Commands: [] });
+  }
+  const added = importFullBleCatalog(path);
+  selectedCmdFile = path;
+  populateCmdFileSelect();
+  renderCommandsTable();
+  const msg = $('learn-msg');
+  if (msg) {
+    msg.textContent = `Added ${added} BLE key(s) to ${path}. Save to remote when ready.`;
     msg.className = 'msg ok';
   }
 });
