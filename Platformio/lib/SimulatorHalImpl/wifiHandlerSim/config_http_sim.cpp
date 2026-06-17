@@ -5,7 +5,7 @@
 #include "editor_sync_mode.hpp"
 #include "http_sim_util.hpp"
 
-#include "Hardware/wifiHandlerInterface.h"
+#include "Hardware/wifi/wifiHandlerInterface.h"
 #include "HardwareFactory.hpp"
 #include "RapidJsonUtilty.hpp"
 #include "device_settings.hpp"

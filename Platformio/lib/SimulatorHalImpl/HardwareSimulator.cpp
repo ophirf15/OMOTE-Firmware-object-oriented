@@ -42,7 +42,6 @@ HardwareSimulator::HardwareSimulator()
     std::printf("[sim] using existing %s (editor saves kept)\n", SimWorkingDir);
     std::fflush(stdout);
   }
-  }
 #endif
 
   mSDLEventHandler.SetNotification(mKeys->getSDLEventNotification());
