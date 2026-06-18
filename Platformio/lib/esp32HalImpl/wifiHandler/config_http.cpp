@@ -347,22 +347,29 @@ void handleFsRead() {
     return;
   }
 
-  std::ifstream file(vfsPath(path), std::ios::in);
-  if (!file) {
+  // Read via the Arduino LittleFS API (not std::ifstream) so this matches the
+  // filesystem view used by writes, /api/fs/tree and the firmware reader.
+  File file;
+  size_t fileSize = 0;
+  if (!openFsPath(path, file, fileSize)) {
     sendJson(404, "{\"error\":\"not found\"}");
     return;
   }
-  file.seekg(0, std::ios::end);
-  const auto fileSize = static_cast<size_t>(file.tellg());
   if (fileSize > maxRead) {
+    file.close();
     sendJson(413, "{\"error\":\"file too large\"}");
     return;
   }
-  file.seekg(0, std::ios::beg);
 
   std::string content;
   content.reserve(fileSize);
-  content.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+  uint8_t buf[1024];
+  while (true) {
+    const size_t n = file.read(buf, sizeof(buf));
+    if (n == 0)
+      break;
+    content.append(reinterpret_cast<const char *>(buf), n);
+  }
   file.close();
   pumpUiDuringHttp();
 
@@ -419,14 +426,29 @@ void handleFsWrite() {
   else if (server.hasArg("body"))
     body = server.arg("body").c_str();
 
-  const std::string full = vfsPath(path);
-  std::ofstream file(full, std::ios::out | std::ios::trunc);
+  // Use the Arduino LittleFS API (not std::ofstream) so writes land on the same
+  // filesystem view that the firmware reads from and that /api/fs/tree lists.
+  const std::string lfs = lfsPath(path);
+  {
+    const auto slash = lfs.find_last_of('/');
+    if (slash != std::string::npos && slash > 0) {
+      const std::string dir = lfs.substr(0, slash);
+      if (!LittleFS.exists(dir.c_str()))
+        LittleFS.mkdir(dir.c_str());
+    }
+  }
+  File file = LittleFS.open(lfs.c_str(), "w");
   if (!file) {
     sendJson(500, "{\"error\":\"write failed\"}");
     return;
   }
-  file << body;
+  const size_t written =
+      file.write(reinterpret_cast<const uint8_t *>(body.data()), body.size());
   file.close();
+  if (written != body.size()) {
+    sendJson(500, "{\"error\":\"write incomplete\"}");
+    return;
+  }
   if (path == "HaSettings.json")
     config_reload::markHaSettingsDirty();
   else if (path == "DeviceSettings.json")

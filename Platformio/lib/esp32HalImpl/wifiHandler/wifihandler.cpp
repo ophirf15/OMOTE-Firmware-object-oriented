@@ -506,46 +506,33 @@ void wifiHandler::ftpSaveCredentials() {
   d.AddMember("user", mFtpUser, d.GetAllocator());
   d.AddMember("password", mFtpPassword, d.GetAllocator());
 
-  std::ofstream file(FS_PATH "ftp.json", std::ios::out | std::ios::trunc);
-  if (!file) {
+  if (OMOTE::JSON::WriteDocumentToFile(d, std::filesystem::path(FS_PATH "ftp.json")) !=
+      OMOTE::JSON::DocumentFileWriteResult::Success) {
     mLogger->error("Could not save FTP credentials.");
     return;
   }
-
-  std::string jsonStr = OMOTE::JSON::ToString(d);
-  file << jsonStr;
-  file.close();
 
   mLogger->info("FTP credentials saved");
 }
 
 void wifiHandler::ftpRestoreCredentials() {
-  // restore from disk
-  std::ifstream file(FS_PATH "ftp.json", std::ios::in);
-  if (!file) {
+  // restore from disk via the Arduino LittleFS-backed reader
+  rapidjson::Document d = OMOTE::JSON::GetDocument(std::filesystem::path(FS_PATH "ftp.json"));
+  if (!d.IsObject()) {
     mLogger->error("Could not load FTP credentials.");
     return;
   }
 
-  std::stringstream buffer;
-  buffer << file.rdbuf();
-  file.close();
-  std::string content(buffer.str());
-
-  rapidjson::Document d;
-  if (!d.Parse(content.c_str()).HasParseError()) {
-    if (d.HasMember("enabled") && d["enabled"].IsBool())
-      mFtpEnabled = d["enabled"].GetBool();
-    if (d.HasMember("mDnsName") && d["mDnsName"].IsString())
-      mmDNSName = d["mDnsName"].GetString();
-    if (d.HasMember("user") && d["user"].IsString())
-      mFtpUser = d["user"].GetString();
-    if (d.HasMember("password") && d["password"].IsString())
-      mFtpPassword = d["password"].GetString();
-    mLogger->info("FTP credentials restored");
-    mLogger->debug("mDNS: " + mmDNSName + ", FTP: " + mFtpUser + (mFtpEnabled ? ", FTP enabled" : ", FTP disabled"));
-  } else
-    mLogger->info("FTP defaults used");
+  if (d.HasMember("enabled") && d["enabled"].IsBool())
+    mFtpEnabled = d["enabled"].GetBool();
+  if (d.HasMember("mDnsName") && d["mDnsName"].IsString())
+    mmDNSName = d["mDnsName"].GetString();
+  if (d.HasMember("user") && d["user"].IsString())
+    mFtpUser = d["user"].GetString();
+  if (d.HasMember("password") && d["password"].IsString())
+    mFtpPassword = d["password"].GetString();
+  mLogger->info("FTP credentials restored");
+  mLogger->debug("mDNS: " + mmDNSName + ", FTP: " + mFtpUser + (mFtpEnabled ? ", FTP enabled" : ", FTP disabled"));
 }
 
 #endif // !IS_SIMULATOR

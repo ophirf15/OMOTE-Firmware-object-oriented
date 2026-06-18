@@ -354,7 +354,7 @@ void Display::setCurrentLcdBrightness(uint8_t brightness) {
     ledc_stop(LEDC_SPEED_MODE, LCD_BACKLIGHT_LEDC_CHANNEL, 255);
 }
 
-#ifdef OMOTE_KEYBRD_3661
+#ifdef OMOTE_HARDWARE_REV5
 void Display::setCurrentKbdBrightness(uint8_t brightness) {
   mKbdBrightness = brightness;
   auto duty = static_cast<int>(mKbdBrightness);

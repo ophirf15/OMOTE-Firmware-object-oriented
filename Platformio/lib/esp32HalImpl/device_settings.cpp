@@ -27,13 +27,6 @@ Settings sSettings;
 uint32_t sLastActivityMs = 0;
 bool sScreenPoweredOff = false;
 
-std::string vfsPath(const char *rel) {
-  std::string base = FS_PATH;
-  if (!base.empty() && base.back() == '/')
-    base.pop_back();
-  return base + "/" + rel;
-}
-
 void clampDeepSleep() {
   const uint32_t minDeep = sSettings.displayTimeoutMs + 60000;
   if (sSettings.deepSleepTimeoutMs < minDeep)
@@ -207,12 +200,9 @@ bool saveToLittleFS() {
   d.AddMember("ftp_user", rapidjson::Value(sSettings.ftpUser.c_str(), a), a);
   d.AddMember("ftp_password", rapidjson::Value(sSettings.ftpPassword.c_str(), a), a);
 
-  std::ofstream out(vfsPath("DeviceSettings.json"), std::ios::out | std::ios::trunc);
-  if (!out)
-    return false;
-  const std::string body = OMOTE::JSON::ToString(d);
-  out << body;
-  return true;
+  return OMOTE::JSON::WriteDocumentToFile(
+             d, std::filesystem::path(FS_PATH "DeviceSettings.json")) ==
+         OMOTE::JSON::DocumentFileWriteResult::Success;
 }
 
 void applyToHardware() {
